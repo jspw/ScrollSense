@@ -1,0 +1,3 @@
+import ScrollSenseCore
+
+ScrollSenseCLI.main()

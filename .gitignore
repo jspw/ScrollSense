@@ -1,0 +1,95 @@
+# Xcode
+#
+# gitignore contributors: remember to keep this file compatible with RubyMotion.
+
+## General
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Icon must be synced with project changes
+Icon
+
+## Build generated
+build/
+DerivedData/
+
+## Various settings
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata/
+
+## Other
+*.moved-aside
+*.xccheckout
+*.xcscmblueprint
+
+## Obj-C/Swift specific
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+#
+# Add this line if you want to avoid checking in source code from Swift Package Manager dependencies.
+# Packages/
+# Package.pins
+# Package.resolved
+.build/
+*.xcodeproj
+xcuserdata/
+*~
+.swiftpm/
+
+# Carthage
+#
+# Add this line if you want to avoid checking in source code from Carthage dependencies.
+# Carthage/Checkouts
+Carthage/Build
+
+# fastlane
+#
+# It is recommended to not store sensitive data in shared fastlane files.
+#
+# fastlane/report.xml
+# fastlane/Preview.html
+# fastlane/screenshots
+# fastlane/test_output
+#
+# You can freely uncomment the following line if you are certain that
+# your files do not contain sensitive information.
+# !fastlane/report.xml
+# !fastlane/Preview.html
+# !fastlane/screenshots
+# !fastlane/test_output
+
+# CocoaPods
+#
+# We recommend against adding the Pods directory to your .gitignore. However
+# you should judge for yourself, the pros and cons are mentioned at:
+# https://guides.cocoapods.org/using/using-cocoapods.html#should-i-check-the-pods-directory-into-source-control
+#
+# Pods/
+#
+# We recommend against adding Session.vim to your .gitignore. However
+# you should judge for yourself, the pros and cons are mentioned at:
+# https://github.com/CocoaPods/CocoaPods/wiki/FAQ#should-i-ignore-the-sessionvim-file-in-my-source-control
+#
+# Session.vim
+
+# Realm
+#
+# Realm is a cross-platform mobile database.
+# https://realm.io/
+#
+# *.realm
+# *.realm.lock
+# *.realm.management
+# *.realm.note

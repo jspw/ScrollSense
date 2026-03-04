@@ -1,0 +1,147 @@
+import CoreGraphics
+import Foundation
+
+// MARK: - Scroll Daemon
+
+/// The main daemon that listens for scroll events and switches
+/// the macOS natural scroll setting based on the active input device.
+public final class ScrollDaemon {
+
+    private let stateManager = StateManager()
+    private var config: ScrollPreferences
+    private var lastConfigCheck = Date()
+    private var eventTap: CFMachPort?
+
+    /// Serial queue for applying system setting changes off the event callback thread.
+    private let applyQueue = DispatchQueue(label: "com.scrollsense.apply")
+
+    /// How often to reload config from disk (seconds).
+    private let configReloadInterval: TimeInterval = 2.0
+
+    public init() {
+        self.config = ConfigManager.shared.load()
+    }
+
+    /// Start the daemon and begin listening for scroll events.
+    /// - Parameter debug: If `true`, enables verbose debug logging.
+    public func start(debug: Bool = false) {
+        Logger.debugEnabled = debug
+        Logger.info("scrollSense daemon starting...")
+
+        // Write PID file for tracking
+        PIDManager.writePID()
+
+        // Initialize state with current system setting
+        stateManager.initializeWithSystemState()
+        Logger.debug(
+            "Initial system natural scroll: \(stateManager.state.lastAppliedScrollValue ?? false)")
+        Logger.debug("Config: mouse=\(config.mouseNatural), trackpad=\(config.trackpadNatural)")
+        Logger.debug("Config path: \(ConfigManager.shared.configPath)")
+
+        // Create event tap for scroll wheel events
+        let mask = CGEventMask(1 << CGEventType.scrollWheel.rawValue)
+
+        eventTap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: mask,
+            callback: { _, _, event, refcon in
+                guard let refcon = refcon else {
+                    return Unmanaged.passUnretained(event)
+                }
+                let daemon = Unmanaged<ScrollDaemon>
+                    .fromOpaque(refcon)
+                    .takeUnretainedValue()
+
+                daemon.handleEvent(event)
+                return Unmanaged.passUnretained(event)
+            },
+            userInfo: UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
+        )
+
+        guard let eventTap = eventTap else {
+            Logger.error("Failed to create event tap.")
+            Logger.error("Please grant Accessibility permission in:")
+            Logger.error("  System Settings → Privacy & Security → Accessibility")
+            Logger.error("  Add your terminal app or the scrollSense binary.")
+            exit(1)
+        }
+
+        let runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0)
+        CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
+        CGEvent.tapEnable(tap: eventTap, enable: true)
+
+        Logger.info("scrollSense daemon running. Listening for scroll events...")
+        if debug {
+            Logger.info("Debug mode enabled. Press Ctrl+C to stop.")
+        }
+
+        // Install signal handler for graceful shutdown
+        signal(SIGINT) { _ in
+            Logger.info("\nscrollSense daemon stopping...")
+            CFRunLoopStop(CFRunLoopGetCurrent())
+        }
+        signal(SIGTERM) { _ in
+            Logger.info("\nscrollSense daemon stopping...")
+            CFRunLoopStop(CFRunLoopGetCurrent())
+        }
+
+        CFRunLoopRun()
+
+        stateManager.markStopped()
+        PIDManager.removePID()
+        Logger.info("scrollSense daemon stopped.")
+        Logger.debug(
+            "Stats: \(stateManager.state.eventCount) events, \(stateManager.state.switchCount) device switches"
+        )
+    }
+
+    /// Handle a single scroll event.
+    private func handleEvent(_ event: CGEvent) {
+        // Periodically reload config to pick up changes from `set` command
+        reloadConfigIfNeeded()
+
+        // Detect device
+        let device = DeviceDetector.detectDevice(from: event)
+
+        // Record the detection
+        let previousDevice = stateManager.state.lastDetectedDevice
+        stateManager.recordDeviceDetection(device)
+
+        // Log device switch
+        if device != previousDevice {
+            Logger.debug(
+                "Device switch: \(previousDevice?.rawValue ?? "none") → \(device.rawValue)")
+            Logger.debug("Event details: \(DeviceDetector.debugDescription(for: event))")
+        }
+
+        // Check if we need to apply a change — dispatch off the event callback thread
+        // so the handler returns immediately and never stalls scroll event processing.
+        if let desiredValue = stateManager.shouldApplyChange(for: device, config: config) {
+            // Optimistically record the value now (on the main thread) to prevent
+            // duplicate dispatches for events that arrive before the write completes.
+            stateManager.recordAppliedValue(desiredValue)
+            let displayName = device.displayName
+            applyQueue.async {
+                Logger.debug("Applying scroll change: natural=\(desiredValue) (for \(displayName))")
+                ScrollController.setNaturalScroll(desiredValue)
+            }
+        }
+    }
+
+    /// Reload configuration from disk if enough time has passed.
+    private func reloadConfigIfNeeded() {
+        let now = Date()
+        guard now.timeIntervalSince(lastConfigCheck) >= configReloadInterval else { return }
+
+        let newConfig = ConfigManager.shared.load()
+        if newConfig != config {
+            Logger.debug(
+                "Config reloaded: mouse=\(newConfig.mouseNatural), trackpad=\(newConfig.trackpadNatural)"
+            )
+            config = newConfig
+        }
+        lastConfigCheck = now
+    }
+}
