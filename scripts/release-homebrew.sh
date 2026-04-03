@@ -30,8 +30,29 @@ Notes:
 EOF
 }
 
+section() {
+  printf '\n==> %s\n' "$1"
+}
+
+info() {
+  printf 'ℹ️  %s\n' "$1"
+}
+
+success() {
+  printf '✅ %s\n' "$1"
+}
+
+warn_msg() {
+  printf '⚠️  %s\n' "$1" >&2
+}
+
+error_msg() {
+  printf '❌ %s\n' "$1" >&2
+}
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FORMULA_PATH="${ROOT_DIR}/Formula/scrollsense.rb"
+CLI_PATH="${ROOT_DIR}/Sources/ScrollSense/ScrollSense.swift"
 REPO_SLUG="jspw/ScrollSense"
 TAP_DIR=""
 REMOTE_NAME="origin"
@@ -54,7 +75,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --tap-dir)
       if [[ $# -lt 2 ]]; then
-        echo "Missing value for --tap-dir" >&2
+        error_msg "Missing value for --tap-dir"
         exit 1
       fi
       TAP_DIR="$2"
@@ -62,7 +83,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --repo)
       if [[ $# -lt 2 ]]; then
-        echo "Missing value for --repo" >&2
+        error_msg "Missing value for --repo"
         exit 1
       fi
       REPO_SLUG="$2"
@@ -70,7 +91,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --remote)
       if [[ $# -lt 2 ]]; then
-        echo "Missing value for --remote" >&2
+        error_msg "Missing value for --remote"
         exit 1
       fi
       REMOTE_NAME="$2"
@@ -78,7 +99,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --tap-remote)
       if [[ $# -lt 2 ]]; then
-        echo "Missing value for --tap-remote" >&2
+        error_msg "Missing value for --tap-remote"
         exit 1
       fi
       TAP_REMOTE_NAME="$2"
@@ -89,7 +110,7 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     *)
-      echo "Unknown argument: $1" >&2
+      error_msg "Unknown argument: $1"
       usage
       exit 1
       ;;
@@ -97,7 +118,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ ! -f "${FORMULA_PATH}" ]]; then
-  echo "Formula not found: ${FORMULA_PATH}" >&2
+  error_msg "Formula not found: ${FORMULA_PATH}"
+  exit 1
+fi
+
+if [[ ! -f "${CLI_PATH}" ]]; then
+  error_msg "CLI source not found: ${CLI_PATH}"
   exit 1
 fi
 
@@ -106,14 +132,30 @@ require_clean_repo() {
   local repo_label="$2"
 
   if ! git -C "${repo_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    echo "${repo_label} is not a git repository: ${repo_dir}" >&2
+    error_msg "${repo_label} is not a git repository: ${repo_dir}"
     exit 1
   fi
 
   if [[ -n "$(git -C "${repo_dir}" status --porcelain)" ]]; then
-    echo "${repo_label} is not clean. Commit or stash your changes before releasing." >&2
+    error_msg "${repo_label} is not clean."
+    info "Commit or stash your changes before releasing."
     exit 1
   fi
+}
+
+extract_cli_version() {
+  ruby - "${CLI_PATH}" <<'RUBY'
+path = ARGV[0]
+content = File.read(path)
+match = content.match(/^\s*version: "([^"]+)",$/)
+
+if match
+  puts match[1]
+else
+  warn "Could not determine current CLI version from #{path}"
+  exit 1
+end
+RUBY
 }
 
 if [[ "${VERSION_ARG}" == v* ]]; then
@@ -126,8 +168,16 @@ fi
 
 require_clean_repo "${ROOT_DIR}" "Source repo"
 
+CURRENT_CLI_VERSION="$(extract_cli_version)"
+section "Release Prep"
+if [[ "${CURRENT_CLI_VERSION}" == "${PLAIN_VERSION}" ]]; then
+  success "Version check passed: current CLI version matches requested tag (${CURRENT_CLI_VERSION})"
+else
+  warn_msg "Version check mismatch: current CLI version is ${CURRENT_CLI_VERSION}, requested tag is ${PLAIN_VERSION}"
+fi
+
 if ! git -C "${ROOT_DIR}" remote get-url "${REMOTE_NAME}" >/dev/null 2>&1; then
-  echo "Git remote not found: ${REMOTE_NAME}" >&2
+  error_msg "Git remote not found: ${REMOTE_NAME}"
   exit 1
 fi
 
@@ -136,27 +186,25 @@ if [[ -n "${TAP_DIR}" ]]; then
   require_clean_repo "${TAP_DIR}" "Tap repo"
 
   if ! git -C "${TAP_DIR}" remote get-url "${TAP_REMOTE_NAME}" >/dev/null 2>&1; then
-    echo "Tap git remote not found: ${TAP_REMOTE_NAME}" >&2
+    error_msg "Tap git remote not found: ${TAP_REMOTE_NAME}"
     exit 1
   fi
 fi
 
 if git -C "${ROOT_DIR}" rev-parse -q --verify "refs/tags/${TAG_VERSION}" >/dev/null 2>&1; then
-  echo "Tag already exists locally: ${TAG_VERSION}" >&2
+  error_msg "Tag already exists locally: ${TAG_VERSION}"
   exit 1
 fi
 
 if git -C "${ROOT_DIR}" ls-remote --exit-code --tags "${REMOTE_NAME}" "refs/tags/${TAG_VERSION}" >/dev/null 2>&1; then
-  echo "Tag already exists on remote ${REMOTE_NAME}: ${TAG_VERSION}" >&2
+  error_msg "Tag already exists on remote ${REMOTE_NAME}: ${TAG_VERSION}"
   exit 1
 fi
 
-echo "Creating git tag:"
-echo "  ${TAG_VERSION}"
+info "Creating git tag ${TAG_VERSION}"
 git -C "${ROOT_DIR}" tag -a "${TAG_VERSION}" -m "Release ${TAG_VERSION}"
 
-echo "Pushing git tag to ${REMOTE_NAME}:"
-echo "  ${TAG_VERSION}"
+info "Pushing git tag ${TAG_VERSION} to ${REMOTE_NAME}"
 git -C "${ROOT_DIR}" push "${REMOTE_NAME}" "${TAG_VERSION}"
 
 TARBALL_URL="https://github.com/${REPO_SLUG}/archive/refs/tags/${TAG_VERSION}.tar.gz"
@@ -167,8 +215,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "Downloading release tarball:"
-echo "  ${TARBALL_URL}"
+section "Tarball"
+info "Downloading release tarball"
+info "${TARBALL_URL}"
 
 download_ok=0
 for _ in 1 2 3 4 5; do
@@ -180,16 +229,30 @@ for _ in 1 2 3 4 5; do
 done
 
 if [[ "${download_ok}" -ne 1 ]]; then
-  echo "" >&2
-  echo "Failed to download the release tarball after pushing the tag." >&2
-  echo "GitHub may not have published the archive yet. Retry in a moment." >&2
+  error_msg "Failed to download the release tarball after pushing the tag."
+  info "GitHub may not have published the archive yet. Retry in a moment."
   exit 1
 fi
 
 SHA256="$(shasum -a 256 "${TMP_TARBALL}" | awk '{print $1}')"
 
-echo "Computed SHA-256:"
-echo "  ${SHA256}"
+success "Computed SHA-256"
+info "${SHA256}"
+
+ruby - "${CLI_PATH}" "${PLAIN_VERSION}" <<'RUBY'
+path, version = ARGV
+content = File.read(path)
+
+original = content.dup
+content.sub!(/^        version: ".*",$/, %{        version: "#{version}",})
+
+if content == original
+  STDERR.puts "CLI version was not updated. Expected version line was not found."
+  exit 1
+end
+
+File.write(path, content)
+RUBY
 
 ruby - "${FORMULA_PATH}" "${TARBALL_URL}" "${SHA256}" "${PLAIN_VERSION}" <<'RUBY'
 path, url, sha, version = ARGV
@@ -205,51 +268,54 @@ content.sub!(
 )
 
 if content == original
-  warn "Formula was not updated. Expected url/sha256/test lines were not found."
+  STDERR.puts "Formula was not updated. Expected url/sha256/test lines were not found."
   exit 1
 end
 
 File.write(path, content)
 RUBY
 
-echo "Updated formula:"
-echo "  ${FORMULA_PATH}"
+section "Source Updates"
+success "Updated formula"
+info "${FORMULA_PATH}"
+success "Updated CLI version"
+info "${CLI_PATH}"
 
-echo "Committing formula update in source repo"
-git -C "${ROOT_DIR}" add "Formula/scrollsense.rb"
-git -C "${ROOT_DIR}" commit -m "Update Homebrew formula for ${TAG_VERSION}"
+info "Committing release metadata in source repo"
+git -C "${ROOT_DIR}" add "Formula/scrollsense.rb" "Sources/ScrollSense/ScrollSense.swift"
+git -C "${ROOT_DIR}" commit -m "Release ${TAG_VERSION}"
 
-echo "Pushing source repo commit to ${REMOTE_NAME}"
+info "Pushing source repo commit to ${REMOTE_NAME}"
 git -C "${ROOT_DIR}" push "${REMOTE_NAME}" HEAD
 
 if [[ -n "${TAP_DIR}" ]]; then
+  section "Tap Sync"
   mkdir -p "${TAP_DIR}/Formula"
   cp "${FORMULA_PATH}" "${TAP_DIR}/Formula/scrollsense.rb"
-  echo "Copied formula to tap repo:"
-  echo "  ${TAP_DIR}/Formula/scrollsense.rb"
+  success "Copied formula to tap repo"
+  info "${TAP_DIR}/Formula/scrollsense.rb"
 
-  echo "Committing formula update in tap repo"
+  info "Committing formula update in tap repo"
   git -C "${TAP_DIR}" add "Formula/scrollsense.rb"
   git -C "${TAP_DIR}" commit -m "scrollsense ${PLAIN_VERSION}"
 
-  echo "Pushing tap repo commit to ${TAP_REMOTE_NAME}"
+  info "Pushing tap repo commit to ${TAP_REMOTE_NAME}"
   git -C "${TAP_DIR}" push "${TAP_REMOTE_NAME}" HEAD
 fi
 
-echo ""
-echo "Release automation completed."
-echo "Next steps:"
-echo "  1. Run Homebrew verification if you want an extra confidence check"
+section "Done"
+success "Release automation completed."
+printf 'Next steps:\n'
+printf '  1. Run Homebrew verification if you want an extra confidence check\n'
 if [[ -n "${TAP_DIR}" ]]; then
-  echo "  2. Verify the published tap update with brew update && brew upgrade scrollsense"
+  printf '  2. Verify the published tap update with brew update && brew upgrade scrollsense\n'
 else
-  echo "  2. Copy Formula/scrollsense.rb into your tap repo if you publish from a separate repository"
+  printf '  2. Copy Formula/scrollsense.rb into your tap repo if you publish from a separate repository\n'
 fi
-echo ""
-echo "Suggested commands:"
-echo "  brew audit --strict ./Formula/scrollsense.rb"
-echo "  brew install --build-from-source ./Formula/scrollsense.rb"
-echo "  brew test scrollsense"
+printf '\nSuggested commands:\n'
+printf '  brew audit --strict ./Formula/scrollsense.rb\n'
+printf '  brew install --build-from-source ./Formula/scrollsense.rb\n'
+printf '  brew test scrollsense\n'
 if [[ -n "${TAP_DIR}" ]]; then
-  echo "  brew update && brew upgrade scrollsense"
+  printf '  brew update && brew upgrade scrollsense\n'
 fi
