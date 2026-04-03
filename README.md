@@ -375,9 +375,10 @@ That script:
 * downloads the GitHub release tarball for the tag
 * computes the correct `sha256`
 * updates [`Formula/scrollsense.rb`](./Formula/scrollsense.rb)
-* copies the formula into your tap repo if you pass `--tap-dir`
+* commits and pushes the formula update in this repo
+* copies, commits, and pushes the formula into your tap repo if you pass `--tap-dir`
 
-Your source repo must be clean before running it, since the script tags the current commit.
+Your source repo must be clean before running it, since the script tags the current commit. If you pass `--tap-dir`, the tap repo must also be clean.
 
 ### Manual Flow
 
@@ -417,6 +418,7 @@ scrollSense --version
 ./scripts/release-homebrew.sh 1.0.1 --tap-dir ../homebrew-scrollsense
 ./scripts/release-homebrew.sh v1.0.1 --repo jspw/ScrollSense --tap-dir ../homebrew-scrollsense
 ./scripts/release-homebrew.sh v1.0.1 --remote origin --tap-dir ../homebrew-scrollsense
+./scripts/release-homebrew.sh v1.0.1 --tap-dir ../homebrew-scrollsense --tap-remote origin
 ```
 
 ### Publish / Upload to Homebrew

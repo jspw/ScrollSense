@@ -5,13 +5,14 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/release-homebrew.sh <version> [--tap-dir <path>] [--repo <owner/name>] [--remote <name>]
+  ./scripts/release-homebrew.sh <version> [--tap-dir <path>] [--repo <owner/name>] [--remote <name>] [--tap-remote <name>]
 
 Examples:
   ./scripts/release-homebrew.sh v1.0.1
   ./scripts/release-homebrew.sh 1.0.1 --tap-dir ../homebrew-scrollsense
   ./scripts/release-homebrew.sh v1.0.1 --repo jspw/ScrollSense --tap-dir ../homebrew-scrollsense
   ./scripts/release-homebrew.sh v1.0.1 --remote origin --tap-dir ../homebrew-scrollsense
+  ./scripts/release-homebrew.sh v1.0.1 --tap-dir ../homebrew-scrollsense --tap-remote origin
 
 What it does:
   1. Creates a git tag for the requested version
@@ -19,12 +20,13 @@ What it does:
   3. Downloads the GitHub tag tarball
   4. Computes its SHA-256
   5. Updates Formula/scrollsense.rb with the new url, sha256, and version test
-  6. Optionally copies the formula into your Homebrew tap repo
+  6. Commits and pushes the formula update in the source repo
+  7. Optionally copies, commits, and pushes the formula into your Homebrew tap repo
 
 Notes:
   - The source repo must be clean before the script will create the tag.
+  - If you pass --tap-dir, the tap repo must also be clean before the script runs.
   - This script creates an annotated tag like v1.0.1 and pushes it to the configured remote.
-  - This script does not push commits for you. It prepares the formula so you can review and push.
 EOF
 }
 
@@ -33,6 +35,7 @@ FORMULA_PATH="${ROOT_DIR}/Formula/scrollsense.rb"
 REPO_SLUG="jspw/ScrollSense"
 TAP_DIR=""
 REMOTE_NAME="origin"
+TAP_REMOTE_NAME="origin"
 
 if [[ $# -lt 1 ]]; then
   usage
@@ -73,6 +76,14 @@ while [[ $# -gt 0 ]]; do
       REMOTE_NAME="$2"
       shift 2
       ;;
+    --tap-remote)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --tap-remote" >&2
+        exit 1
+      fi
+      TAP_REMOTE_NAME="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -90,6 +101,21 @@ if [[ ! -f "${FORMULA_PATH}" ]]; then
   exit 1
 fi
 
+require_clean_repo() {
+  local repo_dir="$1"
+  local repo_label="$2"
+
+  if ! git -C "${repo_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "${repo_label} is not a git repository: ${repo_dir}" >&2
+    exit 1
+  fi
+
+  if [[ -n "$(git -C "${repo_dir}" status --porcelain)" ]]; then
+    echo "${repo_label} is not clean. Commit or stash your changes before releasing." >&2
+    exit 1
+  fi
+}
+
 if [[ "${VERSION_ARG}" == v* ]]; then
   TAG_VERSION="${VERSION_ARG}"
   PLAIN_VERSION="${VERSION_ARG#v}"
@@ -98,19 +124,21 @@ else
   PLAIN_VERSION="${VERSION_ARG}"
 fi
 
-if ! git -C "${ROOT_DIR}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  echo "This script must be run from inside a git repository." >&2
-  exit 1
-fi
-
-if [[ -n "$(git -C "${ROOT_DIR}" status --porcelain)" ]]; then
-  echo "Working tree is not clean. Commit or stash your changes before releasing." >&2
-  exit 1
-fi
+require_clean_repo "${ROOT_DIR}" "Source repo"
 
 if ! git -C "${ROOT_DIR}" remote get-url "${REMOTE_NAME}" >/dev/null 2>&1; then
   echo "Git remote not found: ${REMOTE_NAME}" >&2
   exit 1
+fi
+
+if [[ -n "${TAP_DIR}" ]]; then
+  TAP_DIR="$(cd "${TAP_DIR}" && pwd)"
+  require_clean_repo "${TAP_DIR}" "Tap repo"
+
+  if ! git -C "${TAP_DIR}" remote get-url "${TAP_REMOTE_NAME}" >/dev/null 2>&1; then
+    echo "Tap git remote not found: ${TAP_REMOTE_NAME}" >&2
+    exit 1
+  fi
 fi
 
 if git -C "${ROOT_DIR}" rev-parse -q --verify "refs/tags/${TAG_VERSION}" >/dev/null 2>&1; then
@@ -187,26 +215,41 @@ RUBY
 echo "Updated formula:"
 echo "  ${FORMULA_PATH}"
 
+echo "Committing formula update in source repo"
+git -C "${ROOT_DIR}" add "Formula/scrollsense.rb"
+git -C "${ROOT_DIR}" commit -m "Update Homebrew formula for ${TAG_VERSION}"
+
+echo "Pushing source repo commit to ${REMOTE_NAME}"
+git -C "${ROOT_DIR}" push "${REMOTE_NAME}" HEAD
+
 if [[ -n "${TAP_DIR}" ]]; then
-  TAP_DIR="$(cd "${TAP_DIR}" && pwd)"
   mkdir -p "${TAP_DIR}/Formula"
   cp "${FORMULA_PATH}" "${TAP_DIR}/Formula/scrollsense.rb"
   echo "Copied formula to tap repo:"
   echo "  ${TAP_DIR}/Formula/scrollsense.rb"
+
+  echo "Committing formula update in tap repo"
+  git -C "${TAP_DIR}" add "Formula/scrollsense.rb"
+  git -C "${TAP_DIR}" commit -m "scrollsense ${PLAIN_VERSION}"
+
+  echo "Pushing tap repo commit to ${TAP_REMOTE_NAME}"
+  git -C "${TAP_DIR}" push "${TAP_REMOTE_NAME}" HEAD
 fi
 
 echo ""
+echo "Release automation completed."
 echo "Next steps:"
-echo "  1. Review the formula diff"
-echo "  2. Commit the formula change in this repo"
+echo "  1. Run Homebrew verification if you want an extra confidence check"
 if [[ -n "${TAP_DIR}" ]]; then
-  echo "  3. Commit and push the formula change in the tap repo"
+  echo "  2. Verify the published tap update with brew update && brew upgrade scrollsense"
 else
-  echo "  3. Copy Formula/scrollsense.rb into your tap repo and push it"
+  echo "  2. Copy Formula/scrollsense.rb into your tap repo if you publish from a separate repository"
 fi
 echo ""
 echo "Suggested commands:"
-echo "  git diff -- Formula/scrollsense.rb"
+echo "  brew audit --strict ./Formula/scrollsense.rb"
+echo "  brew install --build-from-source ./Formula/scrollsense.rb"
+echo "  brew test scrollsense"
 if [[ -n "${TAP_DIR}" ]]; then
-  echo "  (cd ${TAP_DIR} && git status --short && git add Formula/scrollsense.rb && git commit -m \"scrollsense ${PLAIN_VERSION}\" && git push)"
+  echo "  brew update && brew upgrade scrollsense"
 fi
