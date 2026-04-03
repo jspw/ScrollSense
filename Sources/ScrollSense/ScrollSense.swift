@@ -14,7 +14,7 @@ public struct ScrollSenseCLI: ParsableCommand {
 
             No manual toggling. No friction. No System Settings visits.
             """,
-        version: "1.0.4",
+        version: "1.0.5",
         subcommands: [
             Start.self, Stop.self, Run.self, Set.self, Status.self,
             Install.self, Uninstall.self,
