@@ -44,7 +44,7 @@ public final class ScrollDaemon {
         eventTap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
-            options: .defaultTap,
+            options: .listenOnly,
             eventsOfInterest: mask,
             callback: { _, _, event, refcon in
                 guard let refcon = refcon else {
@@ -69,7 +69,8 @@ public final class ScrollDaemon {
         }
 
         let runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0)
-        CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
+        let mainRunLoop = CFRunLoopGetCurrent()!
+        CFRunLoopAddSource(mainRunLoop, runLoopSource, .commonModes)
         CGEvent.tapEnable(tap: eventTap, enable: true)
 
         Logger.info("scrollSense daemon running. Listening for scroll events...")
@@ -77,17 +78,30 @@ public final class ScrollDaemon {
             Logger.info("Debug mode enabled. Press Ctrl+C to stop.")
         }
 
-        // Install signal handler for graceful shutdown
-        signal(SIGINT) { _ in
+        // Install signal handlers for graceful shutdown using DispatchSource
+        // (signal() handlers can't reliably reference the correct run loop)
+        let sigintSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
+        let sigtermSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+
+        // Ignore default signal handling so DispatchSource receives the signals
+        signal(SIGINT, SIG_IGN)
+        signal(SIGTERM, SIG_IGN)
+
+        sigintSource.setEventHandler {
             Logger.info("\nscrollSense daemon stopping...")
-            CFRunLoopStop(CFRunLoopGetCurrent())
+            CFRunLoopStop(mainRunLoop)
         }
-        signal(SIGTERM) { _ in
+        sigtermSource.setEventHandler {
             Logger.info("\nscrollSense daemon stopping...")
-            CFRunLoopStop(CFRunLoopGetCurrent())
+            CFRunLoopStop(mainRunLoop)
         }
+        sigintSource.resume()
+        sigtermSource.resume()
 
         CFRunLoopRun()
+
+        sigintSource.cancel()
+        sigtermSource.cancel()
 
         stateManager.markStopped()
         PIDManager.removePID()

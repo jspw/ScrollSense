@@ -54,11 +54,18 @@ It simulates per-device scroll preferences — even though macOS does not suppor
 
 ## Installation
 
+### Homebrew
+
+```bash
+brew tap jspw/scrollsense
+brew install scrollsense
+```
+
 ### Build from Source
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/ScrollSense.git
+git clone https://github.com/jspw/ScrollSense.git
 cd ScrollSense
 
 # Build release binary
@@ -354,7 +361,7 @@ The daemon reloads this file every 2 seconds, so changes made via `scrollSense s
 * [ ] Menu bar app
 * [ ] Device-specific sensitivity profiles
 * [ ] GUI preference panel
-* [ ] Homebrew distribution
+* [x] Homebrew distribution
 * [ ] Notarized binary
 * [ ] Strict mode (periodic system preference verification)
 * [ ] Per-device custom scroll speed

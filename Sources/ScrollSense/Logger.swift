@@ -7,6 +7,11 @@ public enum Logger {
     /// Whether debug logging is enabled.
     public static var debugEnabled: Bool = false
 
+    private static let dateFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        return formatter
+    }()
+
     /// Log an informational message.
     public static func info(_ message: String) {
         print("[scrollSense] \(message)")
@@ -15,7 +20,7 @@ public enum Logger {
     /// Log a debug message (only when debug mode is enabled).
     public static func debug(_ message: String) {
         guard debugEnabled else { return }
-        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let timestamp = dateFormatter.string(from: Date())
         print("[scrollSense DEBUG \(timestamp)] \(message)")
     }
 

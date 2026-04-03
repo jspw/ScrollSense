@@ -52,14 +52,18 @@ public struct Start: ParsableCommand {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: executablePath)
         task.arguments = ["run"]
+        task.standardInput = FileHandle.nullDevice
         task.standardOutput = FileHandle.nullDevice
         task.standardError = FileHandle.nullDevice
-
-        // Detach from terminal
         task.environment = ProcessInfo.processInfo.environment
 
         do {
             try task.run()
+
+            // Move the child into its own process group so that closing the
+            // terminal does not deliver SIGHUP to the daemon.
+            setpgid(task.processIdentifier, task.processIdentifier)
+
             // Give it a moment to start and write PID
             usleep(500_000)  // 0.5 seconds
 

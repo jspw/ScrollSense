@@ -6,6 +6,9 @@ import Foundation
 public final class LaunchAgentManager {
     public static let label = "com.scrollsense.daemon"
 
+    /// The current user's UID as a string, used by `launchctl bootstrap`/`bootout`.
+    private static var userDomain: String { "gui/\(getuid())" }
+
     private static var launchAgentDir: URL {
         let home = FileManager.default.homeDirectoryForCurrentUser
         return home.appendingPathComponent("Library/LaunchAgents")
@@ -67,10 +70,11 @@ public final class LaunchAgentManager {
             return false
         }
 
-        // Load the agent
+        // Bootstrap the agent using the modern launchctl API (macOS 10.11+).
+        // `launchctl bootstrap gui/<uid> <plist>` replaces the deprecated `launchctl load`.
         let loadTask = Process()
         loadTask.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        loadTask.arguments = ["load", plistURL.path]
+        loadTask.arguments = ["bootstrap", userDomain, plistURL.path]
         loadTask.standardOutput = Pipe()
         loadTask.standardError = Pipe()
 
@@ -78,8 +82,10 @@ public final class LaunchAgentManager {
             try loadTask.run()
             loadTask.waitUntilExit()
         } catch {
-            Logger.warning("Failed to load LaunchAgent: \(error.localizedDescription)")
-            Logger.warning("You may need to load it manually: launchctl load \(plistURL.path)")
+            Logger.warning("Failed to bootstrap LaunchAgent: \(error.localizedDescription)")
+            Logger.warning(
+                "You may need to load it manually: launchctl bootstrap \(userDomain) \(plistURL.path)"
+            )
         }
 
         return true
@@ -93,10 +99,11 @@ public final class LaunchAgentManager {
             return true
         }
 
-        // Unload the agent first
+        // Bootout the agent using the modern launchctl API (macOS 10.11+).
+        // `launchctl bootout gui/<uid> <plist>` replaces the deprecated `launchctl unload`.
         let unloadTask = Process()
         unloadTask.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        unloadTask.arguments = ["unload", plistURL.path]
+        unloadTask.arguments = ["bootout", userDomain, plistURL.path]
         unloadTask.standardOutput = Pipe()
         unloadTask.standardError = Pipe()
 
@@ -104,7 +111,7 @@ public final class LaunchAgentManager {
             try unloadTask.run()
             unloadTask.waitUntilExit()
         } catch {
-            Logger.warning("Failed to unload LaunchAgent: \(error.localizedDescription)")
+            Logger.warning("Failed to bootout LaunchAgent: \(error.localizedDescription)")
         }
 
         // Remove the plist file
