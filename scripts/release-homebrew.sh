@@ -173,7 +173,9 @@ section "Release Prep"
 if [[ "${CURRENT_CLI_VERSION}" == "${PLAIN_VERSION}" ]]; then
   success "Version check passed: current CLI version matches requested tag (${CURRENT_CLI_VERSION})"
 else
-  warn_msg "Version check mismatch: current CLI version is ${CURRENT_CLI_VERSION}, requested tag is ${PLAIN_VERSION}"
+  error_msg "Version check failed: current CLI version is ${CURRENT_CLI_VERSION}, requested tag is ${PLAIN_VERSION}"
+  info "Update ${CLI_PATH} to ${PLAIN_VERSION}, commit it, then rerun this script."
+  exit 1
 fi
 
 if ! git -C "${ROOT_DIR}" remote get-url "${REMOTE_NAME}" >/dev/null 2>&1; then
