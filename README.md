@@ -363,6 +363,21 @@ No Electron. No UI frameworks. Pure native macOS.
 
 ### Bump the Formula for a New Release
 
+The easiest way is to use the release helper:
+
+```bash
+./scripts/release-homebrew.sh v1.0.1 --tap-dir ../homebrew-scrollsense
+```
+
+That script:
+
+* downloads the GitHub release tarball for the tag
+* computes the correct `sha256`
+* updates [`Formula/scrollsense.rb`](./Formula/scrollsense.rb)
+* copies the formula into your tap repo if you pass `--tap-dir`
+
+### Manual Flow
+
 1. Create and push a new git tag:
 
 ```bash
@@ -391,6 +406,16 @@ brew install --build-from-source ./Formula/scrollsense.rb
 brew test scrollsense
 scrollSense --version
 ```
+
+### Script Options
+
+```bash
+./scripts/release-homebrew.sh v1.0.1
+./scripts/release-homebrew.sh 1.0.1 --tap-dir ../homebrew-scrollsense
+./scripts/release-homebrew.sh v1.0.1 --repo jspw/ScrollSense --tap-dir ../homebrew-scrollsense
+```
+
+The tag must already exist on GitHub before the script can download the tarball.
 
 ### Publish / Upload to Homebrew
 
