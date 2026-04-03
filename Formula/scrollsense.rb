@@ -1,8 +1,8 @@
 class Scrollsense < Formula
   desc "Automatically switches macOS natural scroll direction based on mouse or trackpad"
   homepage "https://github.com/jspw/ScrollSense"
-  url "https://github.com/jspw/ScrollSense/archive/refs/tags/v1.0.3.tar.gz"
-  sha256 "79f7301548406550be55c69f261b04728fe5029df2a6246c6760fc1dd0619841"
+  url "https://github.com/jspw/ScrollSense/archive/refs/tags/v1.0.4.tar.gz"
+  sha256 "48ba8413e4eac8f865241de3d68aa836ee709bd9419422d548179498c134f284"
   license "MIT"
 
   depends_on xcode: ["14.0", :build]
@@ -39,6 +39,6 @@ class Scrollsense < Formula
   end
 
   test do
-    assert_match "1.0.3", shell_output("#{bin}/scrollSense --version")
+    assert_match "1.0.4", shell_output("#{bin}/scrollSense --version")
   end
 end
