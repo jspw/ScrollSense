@@ -93,3 +93,6 @@ Carthage/Build
 # *.realm.lock
 # *.realm.management
 # *.realm.note
+
+# Ai Agents
+.codex*/

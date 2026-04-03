@@ -1,3 +1,4 @@
+import ApplicationServices
 import CoreGraphics
 import Foundation
 
@@ -26,7 +27,22 @@ public final class ScrollDaemon {
     /// - Parameter debug: If `true`, enables verbose debug logging.
     public func start(debug: Bool = false) {
         Logger.debugEnabled = debug
-        Logger.info("scrollSense daemon starting...")
+        Logger.info("scrollSense daemon starting..." )
+
+        // Check Accessibility permission before doing anything else.
+        // Passing kAXTrustedCheckOptionPrompt=true makes macOS automatically
+        // show a dialog and open System Settings → Accessibility pre-focused
+        // on this binary — no manual Finder navigation needed.
+        let options = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: true] as CFDictionary
+        guard AXIsProcessTrustedWithOptions(options) else {
+            let binaryPath = ProcessInfo.processInfo.arguments.first ?? "scrollSense"
+            Logger.error("Accessibility permission is required.")
+            Logger.error("A system dialog has opened — click \"Open System Settings\"")
+            Logger.error("and enable scrollSense in Privacy & Security → Accessibility.")
+            Logger.error("Binary: \(binaryPath)")
+            Logger.error("Then run: scrollSense start")
+            exit(1)
+        }
 
         // Write PID file for tracking
         PIDManager.writePID()
@@ -61,10 +77,8 @@ public final class ScrollDaemon {
         )
 
         guard let eventTap = eventTap else {
-            Logger.error("Failed to create event tap.")
-            Logger.error("Please grant Accessibility permission in:")
-            Logger.error("  System Settings → Privacy & Security → Accessibility")
-            Logger.error("  Add your terminal app or the scrollSense binary.")
+            Logger.error("Failed to create event tap (permission may have been revoked).")
+            Logger.error("Re-run scrollSense to trigger the permission prompt again.")
             exit(1)
         }
 

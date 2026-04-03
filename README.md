@@ -54,25 +54,50 @@ It simulates per-device scroll preferences — even though macOS does not suppor
 
 ## Installation
 
-### Homebrew
+### Homebrew (Published Tap)
 
 ```bash
 brew tap jspw/scrollsense
 brew install scrollsense
 ```
 
-### Build from Source
+### Homebrew (Local Formula Test)
+
+Use this when you want to validate the formula from this repo before publishing it to your tap:
 
 ```bash
-# Clone the repository
+brew install --build-from-source ./Formula/scrollsense.rb
+brew test scrollsense
+```
+
+### Run from Source Checkout
+
+```bash
 git clone https://github.com/jspw/ScrollSense.git
 cd ScrollSense
 
-# Build release binary
-swift build -c release
+# Run directly from the repo
+swift run scrollSense --help
+swift run scrollSense set --mouse false --trackpad true
+swift run scrollSense run --debug
+```
 
-# Copy to /usr/local/bin (optional)
-cp .build/release/scrollSense /usr/local/bin/
+### Build Release Binary
+
+```bash
+git clone https://github.com/jspw/ScrollSense.git
+cd ScrollSense
+
+swift build -c release
+./.build/release/scrollSense --help
+./.build/release/scrollSense set --mouse false --trackpad true
+./.build/release/scrollSense run --debug
+```
+
+Optional local install:
+
+```bash
+install -m 755 .build/release/scrollSense /usr/local/bin/scrollSense
 ```
 
 ### Permissions Required
@@ -88,6 +113,8 @@ This is required only once during setup.
 ---
 
 ## Usage
+
+If you are running from the repository without installing the binary, replace `scrollSense` with `swift run scrollSense`.
 
 ### Set Preferences
 
@@ -329,6 +356,56 @@ No Electron. No UI frameworks. Pure native macOS.
 | `scrollSense uninstall` | Remove LaunchAgent |
 | `scrollSense --version` | Show version |
 | `scrollSense --help` | Show help |
+
+---
+
+## Homebrew Maintenance
+
+### Bump the Formula for a New Release
+
+1. Create and push a new git tag:
+
+```bash
+git tag v1.0.1
+git push origin v1.0.1
+```
+
+2. Download the release tarball and compute its SHA-256:
+
+```bash
+curl -L https://github.com/jspw/ScrollSense/archive/refs/tags/v1.0.1.tar.gz -o /tmp/scrollsense-v1.0.1.tar.gz
+shasum -a 256 /tmp/scrollsense-v1.0.1.tar.gz
+```
+
+3. Update [`Formula/scrollsense.rb`](./Formula/scrollsense.rb):
+
+* Set `url` to the new tag tarball
+* Set `sha256` to the checksum from `shasum -a 256`
+* Update the version assertion in `test do` if needed
+
+4. Verify the formula locally:
+
+```bash
+brew audit --strict ./Formula/scrollsense.rb
+brew install --build-from-source ./Formula/scrollsense.rb
+brew test scrollsense
+scrollSense --version
+```
+
+### Publish / Upload to Homebrew
+
+If you publish through a separate tap repository such as `jspw/homebrew-scrollsense`:
+
+1. Copy the updated [`Formula/scrollsense.rb`](./Formula/scrollsense.rb) into the tap repo under `Formula/scrollsense.rb`
+2. Commit and push the formula change to the tap repo
+3. Users can then upgrade with:
+
+```bash
+brew update
+brew upgrade scrollsense
+```
+
+If this repository is your source of truth for the formula, keep `Formula/scrollsense.rb` updated here first and mirror the same file into the tap repo you publish from.
 
 ---
 
