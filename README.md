@@ -371,10 +371,13 @@ The easiest way is to use the release helper:
 
 That script:
 
+* creates and pushes the git tag
 * downloads the GitHub release tarball for the tag
 * computes the correct `sha256`
 * updates [`Formula/scrollsense.rb`](./Formula/scrollsense.rb)
 * copies the formula into your tap repo if you pass `--tap-dir`
+
+Your source repo must be clean before running it, since the script tags the current commit.
 
 ### Manual Flow
 
@@ -413,9 +416,8 @@ scrollSense --version
 ./scripts/release-homebrew.sh v1.0.1
 ./scripts/release-homebrew.sh 1.0.1 --tap-dir ../homebrew-scrollsense
 ./scripts/release-homebrew.sh v1.0.1 --repo jspw/ScrollSense --tap-dir ../homebrew-scrollsense
+./scripts/release-homebrew.sh v1.0.1 --remote origin --tap-dir ../homebrew-scrollsense
 ```
-
-The tag must already exist on GitHub before the script can download the tarball.
 
 ### Publish / Upload to Homebrew
 

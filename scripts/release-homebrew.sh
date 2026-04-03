@@ -5,21 +5,25 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/release-homebrew.sh <version> [--tap-dir <path>] [--repo <owner/name>]
+  ./scripts/release-homebrew.sh <version> [--tap-dir <path>] [--repo <owner/name>] [--remote <name>]
 
 Examples:
   ./scripts/release-homebrew.sh v1.0.1
   ./scripts/release-homebrew.sh 1.0.1 --tap-dir ../homebrew-scrollsense
   ./scripts/release-homebrew.sh v1.0.1 --repo jspw/ScrollSense --tap-dir ../homebrew-scrollsense
+  ./scripts/release-homebrew.sh v1.0.1 --remote origin --tap-dir ../homebrew-scrollsense
 
 What it does:
-  1. Downloads the GitHub tag tarball for the requested version
-  2. Computes its SHA-256
-  3. Updates Formula/scrollsense.rb with the new url, sha256, and version test
-  4. Optionally copies the formula into your Homebrew tap repo
+  1. Creates a git tag for the requested version
+  2. Pushes that tag to your git remote
+  3. Downloads the GitHub tag tarball
+  4. Computes its SHA-256
+  5. Updates Formula/scrollsense.rb with the new url, sha256, and version test
+  6. Optionally copies the formula into your Homebrew tap repo
 
 Notes:
-  - The git tag must already exist on GitHub before this script can download the tarball.
+  - The source repo must be clean before the script will create the tag.
+  - This script creates an annotated tag like v1.0.1 and pushes it to the configured remote.
   - This script does not push commits for you. It prepares the formula so you can review and push.
 EOF
 }
@@ -28,6 +32,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FORMULA_PATH="${ROOT_DIR}/Formula/scrollsense.rb"
 REPO_SLUG="jspw/ScrollSense"
 TAP_DIR=""
+REMOTE_NAME="origin"
 
 if [[ $# -lt 1 ]]; then
   usage
@@ -60,6 +65,14 @@ while [[ $# -gt 0 ]]; do
       REPO_SLUG="$2"
       shift 2
       ;;
+    --remote)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --remote" >&2
+        exit 1
+      fi
+      REMOTE_NAME="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -85,6 +98,39 @@ else
   PLAIN_VERSION="${VERSION_ARG}"
 fi
 
+if ! git -C "${ROOT_DIR}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "This script must be run from inside a git repository." >&2
+  exit 1
+fi
+
+if [[ -n "$(git -C "${ROOT_DIR}" status --porcelain)" ]]; then
+  echo "Working tree is not clean. Commit or stash your changes before releasing." >&2
+  exit 1
+fi
+
+if ! git -C "${ROOT_DIR}" remote get-url "${REMOTE_NAME}" >/dev/null 2>&1; then
+  echo "Git remote not found: ${REMOTE_NAME}" >&2
+  exit 1
+fi
+
+if git -C "${ROOT_DIR}" rev-parse -q --verify "refs/tags/${TAG_VERSION}" >/dev/null 2>&1; then
+  echo "Tag already exists locally: ${TAG_VERSION}" >&2
+  exit 1
+fi
+
+if git -C "${ROOT_DIR}" ls-remote --exit-code --tags "${REMOTE_NAME}" "refs/tags/${TAG_VERSION}" >/dev/null 2>&1; then
+  echo "Tag already exists on remote ${REMOTE_NAME}: ${TAG_VERSION}" >&2
+  exit 1
+fi
+
+echo "Creating git tag:"
+echo "  ${TAG_VERSION}"
+git -C "${ROOT_DIR}" tag -a "${TAG_VERSION}" -m "Release ${TAG_VERSION}"
+
+echo "Pushing git tag to ${REMOTE_NAME}:"
+echo "  ${TAG_VERSION}"
+git -C "${ROOT_DIR}" push "${REMOTE_NAME}" "${TAG_VERSION}"
+
 TARBALL_URL="https://github.com/${REPO_SLUG}/archive/refs/tags/${TAG_VERSION}.tar.gz"
 TMP_TARBALL="$(mktemp "/tmp/scrollsense-${PLAIN_VERSION}.XXXXXX.tar.gz")"
 
@@ -96,12 +142,19 @@ trap cleanup EXIT
 echo "Downloading release tarball:"
 echo "  ${TARBALL_URL}"
 
-if ! curl -fL "${TARBALL_URL}" -o "${TMP_TARBALL}"; then
+download_ok=0
+for _ in 1 2 3 4 5; do
+  if curl -fL "${TARBALL_URL}" -o "${TMP_TARBALL}"; then
+    download_ok=1
+    break
+  fi
+  sleep 2
+done
+
+if [[ "${download_ok}" -ne 1 ]]; then
   echo "" >&2
-  echo "Failed to download the release tarball." >&2
-  echo "Make sure tag ${TAG_VERSION} already exists on GitHub:" >&2
-  echo "  git tag ${TAG_VERSION}" >&2
-  echo "  git push origin ${TAG_VERSION}" >&2
+  echo "Failed to download the release tarball after pushing the tag." >&2
+  echo "GitHub may not have published the archive yet. Retry in a moment." >&2
   exit 1
 fi
 
