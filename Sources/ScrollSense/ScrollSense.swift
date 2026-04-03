@@ -69,9 +69,17 @@ public struct Start: ParsableCommand {
 
             if let pid = PIDManager.runningPID {
                 Logger.info("scrollSense daemon started (PID: \(pid)).")
+            } else if !task.isRunning {
+                Logger.error("scrollSense daemon exited during startup.")
+                Logger.error("If a permissions dialog appeared, enable the app in:")
+                Logger.error("  System Settings -> Privacy & Security -> Accessibility")
+                Logger.error("Then re-run: scrollSense start")
+                throw ExitCode.failure
             } else {
-                Logger.info(
-                    "scrollSense daemon launched (PID: \(task.processIdentifier)).")
+                Logger.error("scrollSense daemon did not write a PID file.")
+                Logger.error("Startup may have failed before initialization completed.")
+                Logger.error("Try: scrollSense run")
+                throw ExitCode.failure
             }
         } catch {
             Logger.error("Failed to start daemon: \(error.localizedDescription)")
