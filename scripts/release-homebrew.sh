@@ -245,15 +245,18 @@ ruby - "${CLI_PATH}" "${PLAIN_VERSION}" <<'RUBY'
 path, version = ARGV
 content = File.read(path)
 
-original = content.dup
-content.sub!(/^        version: ".*",$/, %{        version: "#{version}",})
+match = content.match(/^(\s*version: ")([^"]+)(",)$/)
 
-if content == original
-  STDERR.puts "CLI version was not updated. Expected version line was not found."
+if match.nil?
+  STDERR.puts "CLI version line was not found."
   exit 1
 end
 
-File.write(path, content)
+current_version = match[2]
+if current_version != version
+  content.sub!(/^(\s*version: ")([^"]+)(",)$/, "\\1#{version}\\3")
+  File.write(path, content)
+end
 RUBY
 
 ruby - "${FORMULA_PATH}" "${TARBALL_URL}" "${SHA256}" "${PLAIN_VERSION}" <<'RUBY'
