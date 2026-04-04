@@ -1,5 +1,26 @@
+import ApplicationServices
 import ArgumentParser
 import Foundation
+
+// MARK: - Permission Helper
+
+/// Ensures Accessibility permission is granted, prompting + waiting if needed.
+/// Call this before starting the daemon, whether in foreground or background mode.
+func ensureAccessibilityPermission() {
+    let promptOptions = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: true]
+        as CFDictionary
+    guard !AXIsProcessTrustedWithOptions(promptOptions) else { return }
+
+    Logger.info("Accessibility permission required — System Settings has opened.")
+    Logger.info("Enable scrollSense in Privacy & Security → Accessibility, then return here.")
+    Logger.info("Waiting for permission...")
+    while !AXIsProcessTrusted() {
+        usleep(500_000)  // poll every 0.5 s
+    }
+    // Give TCC a moment to persist the grant before the daemon uses it.
+    usleep(1_000_000)  // 1 s
+    Logger.info("Permission granted.")
+}
 
 // MARK: - CLI Commands
 
@@ -14,7 +35,7 @@ public struct ScrollSenseCLI: ParsableCommand {
 
             No manual toggling. No friction. No System Settings visits.
             """,
-        version: "1.0.7",
+        version: "1.0.8",
         subcommands: [
             Start.self, Stop.self, Run.self, Set.self, Status.self,
             Install.self, Uninstall.self,
@@ -39,6 +60,9 @@ public struct Start: ParsableCommand {
             Logger.info("scrollSense daemon is already running (PID: \(pid)).")
             return
         }
+
+        // Ensure permission before spawning the background daemon.
+        ensureAccessibilityPermission()
 
         // Find the executable path
         let executablePath = ProcessInfo.processInfo.arguments.first ?? ""
@@ -70,10 +94,8 @@ public struct Start: ParsableCommand {
             if let pid = PIDManager.runningPID {
                 Logger.info("scrollSense daemon started (PID: \(pid)).")
             } else if !task.isRunning {
-                Logger.error("scrollSense daemon exited during startup.")
-                Logger.error("If a permissions dialog appeared, enable the app in:")
-                Logger.error("  System Settings -> Privacy & Security -> Accessibility")
-                Logger.error("Then re-run: scrollSense start")
+                Logger.error("scrollSense daemon exited unexpectedly during startup.")
+                Logger.error("Try running in the foreground for details: scrollSense run --debug")
                 throw ExitCode.failure
             } else {
                 Logger.error("scrollSense daemon did not write a PID file.")
@@ -120,6 +142,10 @@ public struct Run: ParsableCommand {
     public init() {}
 
     public func run() throws {
+        // Ensure permission here too — `run` can be invoked directly without
+        // going through `start`, so it must own the full permission flow.
+        ensureAccessibilityPermission()
+
         let daemon = ScrollDaemon()
         daemon.start(debug: debug)
     }

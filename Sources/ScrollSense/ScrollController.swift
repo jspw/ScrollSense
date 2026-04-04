@@ -32,6 +32,15 @@ public final class ScrollController {
         let value = enabled ? kCFBooleanTrue : kCFBooleanFalse
         CFPreferencesSetValue(preferenceKey, value, appID, userID, hostID)
         CFPreferencesSynchronize(appID, userID, hostID)
+
+        // Notify the system so the WindowServer applies the change immediately.
+        // This is the same notification System Settings posts when toggling the switch.
+        DistributedNotificationCenter.default().postNotificationName(
+            .init("SwipeScrollDirectionDidChangeNotification"),
+            object: nil,
+            userInfo: nil,
+            deliverImmediately: true
+        )
         Logger.debug("System natural scroll set to: \(enabled)")
     }
 }

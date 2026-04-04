@@ -16,8 +16,12 @@ public final class StateManager {
     public func shouldApplyChange(for device: InputDevice, config: ScrollPreferences) -> Bool? {
         let desiredNaturalScroll = config.naturalScroll(for: device)
 
-        // If the desired setting matches what we last applied, skip
-        if desiredNaturalScroll == state.lastAppliedScrollValue {
+        // Compare against the real system value so manual System Settings
+        // changes are detected and corrected on the next scroll event.
+        let currentSystem = ScrollController.getCurrentNaturalScroll()
+        if desiredNaturalScroll == currentSystem {
+            // Keep our cache in sync so logs stay accurate.
+            state.lastAppliedScrollValue = currentSystem
             return nil
         }
 

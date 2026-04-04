@@ -131,16 +131,16 @@ struct StateManagerTests {
     @Test("shouldApplyChange returns correct value or nil")
     func shouldApplyChange() {
         let manager = StateManager()
-        let config = ScrollPreferences(mouseNatural: false, trackpadNatural: true)
+        let currentSystem = ScrollController.getCurrentNaturalScroll()
 
-        // Simulate system is currently natural=true
-        manager.recordAppliedValue(true)
+        // Build a config where one device matches the system and the other doesn't.
+        let config = ScrollPreferences(mouseNatural: !currentSystem, trackpadNatural: currentSystem)
 
-        // Mouse wants natural=false, system is true → should apply
+        // Mouse wants the opposite of the system → should apply
         let result = manager.shouldApplyChange(for: .mouse, config: config)
-        #expect(result == false)
+        #expect(result == !currentSystem)
 
-        // Trackpad wants natural=true, system is true → no change needed
+        // Trackpad wants same as system → no change needed
         let noChange = manager.shouldApplyChange(for: .trackpad, config: config)
         #expect(noChange == nil)
     }
