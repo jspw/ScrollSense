@@ -6,6 +6,7 @@
 .DS_Store
 .AppleDouble
 .LSOverride
+.vscode
 
 # Icon must be synced with project changes
 Icon
@@ -96,3 +97,4 @@ Carthage/Build
 
 # Ai Agents
 .codex*/
+.claude/
