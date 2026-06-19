@@ -20,6 +20,9 @@ final class ScrollService: ObservableObject {
     /// Whether Accessibility permission has been granted.
     @Published private(set) var hasAccessibility = false
 
+    /// Master switch. When off, ScrollSense pauses — events pass through unchanged.
+    @Published var isEnabled: Bool { didSet { persistAndApply() } }
+
     /// Per-device preferences. Writing persists to disk and updates the engine live.
     @Published var mouseNatural: Bool { didSet { persistAndApply() } }
     @Published var trackpadNatural: Bool { didSet { persistAndApply() } }
@@ -33,6 +36,7 @@ final class ScrollService: ObservableObject {
 
     init() {
         let config = ConfigManager.shared.load()
+        isEnabled = config.enabled
         mouseNatural = config.mouseNatural
         trackpadNatural = config.trackpadNatural
         launchAtLogin = (SMAppService.mainApp.status == .enabled)
@@ -52,7 +56,7 @@ final class ScrollService: ObservableObject {
     /// The icon shown in the menu bar — reflects the active device, dimmed when
     /// permission is missing.
     var menuBarIcon: NSImage {
-        guard hasAccessibility else { return MenuBarIcon.image(for: .disabled) }
+        guard hasAccessibility && isEnabled else { return MenuBarIcon.image(for: .disabled) }
         switch activeDevice {
         case .mouse: return MenuBarIcon.image(for: .mouse)
         case .trackpad: return MenuBarIcon.image(for: .trackpad)
@@ -101,7 +105,8 @@ final class ScrollService: ObservableObject {
     }
 
     private func persistAndApply() {
-        let config = ScrollPreferences(mouseNatural: mouseNatural, trackpadNatural: trackpadNatural)
+        let config = ScrollPreferences(
+            mouseNatural: mouseNatural, trackpadNatural: trackpadNatural, enabled: isEnabled)
         ConfigManager.shared.save(config)
         engine.update(config: config)
     }

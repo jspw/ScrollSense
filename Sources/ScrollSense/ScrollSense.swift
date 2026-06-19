@@ -208,11 +208,14 @@ public struct Set: ParsableCommand {
     @Option(name: .long, help: "Natural scroll for trackpad (true/false)")
     var trackpad: Bool?
 
+    @Option(name: .long, help: "Enable or disable ScrollSense (true/false)")
+    var enabled: Bool?
+
     public init() {}
 
     public func run() throws {
-        if mouse == nil && trackpad == nil {
-            Logger.error("Please specify at least one option: --mouse or --trackpad")
+        if mouse == nil && trackpad == nil && enabled == nil {
+            Logger.error("Please specify at least one option: --mouse, --trackpad, or --enabled")
             Logger.info("Example: scrollSense set --mouse false --trackpad true")
             throw ExitCode.failure
         }
@@ -227,6 +230,11 @@ public struct Set: ParsableCommand {
         if let trackpad = trackpad {
             config.trackpadNatural = trackpad
             Logger.info("Trackpad natural scroll → \(trackpad)")
+        }
+
+        if let enabled = enabled {
+            config.enabled = enabled
+            Logger.info("ScrollSense → \(enabled ? "enabled" : "disabled")")
         }
 
         if ConfigManager.shared.save(config) {
@@ -261,6 +269,7 @@ public struct Status: ParsableCommand {
         } else {
             Logger.status("Daemon", "Stopped")
         }
+        Logger.status("ScrollSense", config.enabled ? "Enabled" : "Disabled (paused)")
         Logger.status("Mouse natural scroll", config.mouseNatural ? "ON" : "OFF")
         Logger.status("Trackpad natural scroll", config.trackpadNatural ? "ON" : "OFF")
         Logger.status("System natural scroll", currentSystem ? "ON" : "OFF")

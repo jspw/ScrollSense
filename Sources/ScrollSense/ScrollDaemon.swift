@@ -151,7 +151,7 @@ public final class ScrollDaemon {
         // event already scrolls in the system baseline direction, so we only
         // need to invert when the two differ.
         let desired = config.naturalScroll(for: device)
-        if desired != systemNaturalScroll {
+        if config.enabled && desired != systemNaturalScroll {
             ScrollInverter.invert(event)
             if device != previousDevice {
                 Logger.debug(

@@ -11,9 +11,13 @@ struct MenuPanelView: View {
 
             if service.hasAccessibility {
                 Divider().padding(.horizontal, 14)
-                currentDevice
-                Divider().padding(.horizontal, 14)
-                deviceControls
+                Group {
+                    currentDevice
+                    Divider().padding(.horizontal, 14)
+                    deviceControls
+                }
+                .opacity(service.isEnabled ? 1 : 0.4)
+                .animation(.easeOut(duration: 0.18), value: service.isEnabled)
                 Divider().padding(.horizontal, 14)
                 footer
             } else {
@@ -27,15 +31,22 @@ struct MenuPanelView: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: 8) {
-            Text("ScrollSense")
-                .font(.system(size: 13, weight: .semibold))
-            Spacer()
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 8) {
+                Text("ScrollSense")
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                Toggle("", isOn: $service.isEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .disabled(!service.hasAccessibility)
+            }
             HStack(spacing: 5) {
                 Circle()
-                    .fill(service.isRunning ? Color.green : Color.secondary.opacity(0.5))
-                    .frame(width: 7, height: 7)
-                Text(service.isRunning ? "On" : "Off")
+                    .fill(statusColor)
+                    .frame(width: 6, height: 6)
+                Text(statusText)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
             }
@@ -43,6 +54,18 @@ struct MenuPanelView: View {
         .padding(.horizontal, 14)
         .padding(.top, 12)
         .padding(.bottom, 10)
+    }
+
+    private var statusText: String {
+        if !service.hasAccessibility { return "Accessibility needed" }
+        if !service.isEnabled { return "Paused — scrolling unchanged" }
+        return service.isRunning ? "Active" : "Starting…"
+    }
+
+    private var statusColor: Color {
+        if !service.hasAccessibility { return .orange }
+        if !service.isEnabled { return Color.secondary.opacity(0.6) }
+        return service.isRunning ? .green : Color.secondary.opacity(0.6)
     }
 
     // MARK: - Current device
@@ -114,7 +137,7 @@ struct MenuPanelView: View {
             Toggle("", isOn: isOn)
                 .labelsHidden()
                 .toggleStyle(.switch)
-                .controlSize(.small)
+                .controlSize(.mini)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 7)

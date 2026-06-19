@@ -22,9 +22,24 @@ public struct ScrollPreferences: Codable, Equatable {
     public var mouseNatural: Bool
     public var trackpadNatural: Bool
 
-    public init(mouseNatural: Bool, trackpadNatural: Bool) {
+    /// Master switch. When `false`, ScrollSense passes scroll events through
+    /// unchanged (no inversion) — the "disabled / paused" state.
+    public var enabled: Bool
+
+    public init(mouseNatural: Bool, trackpadNatural: Bool, enabled: Bool = true) {
         self.mouseNatural = mouseNatural
         self.trackpadNatural = trackpadNatural
+        self.enabled = enabled
+    }
+
+    /// Backward-compatible decoding: older config files have no `enabled` key,
+    /// so default it to `true` rather than failing to decode (which would wipe
+    /// the user's saved per-device preferences).
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        mouseNatural = try c.decode(Bool.self, forKey: .mouseNatural)
+        trackpadNatural = try c.decode(Bool.self, forKey: .trackpadNatural)
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
     }
 
     /// Returns the desired natural scroll setting for the given device.
@@ -35,7 +50,7 @@ public struct ScrollPreferences: Codable, Equatable {
         }
     }
 
-    /// Default preferences: trackpad natural ON, mouse natural OFF.
+    /// Default preferences: trackpad natural ON, mouse natural OFF, enabled.
     public static let `default` = ScrollPreferences(mouseNatural: false, trackpadNatural: true)
 }
 

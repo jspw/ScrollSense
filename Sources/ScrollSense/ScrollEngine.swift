@@ -146,11 +146,12 @@ public final class ScrollEngine {
         let device = DeviceDetector.detectDevice(from: event)
 
         lock.lock()
+        let enabled = config.enabled
         let desired = config.naturalScroll(for: device)
         let baseline = systemNaturalScroll
         lock.unlock()
 
-        if desired != baseline {
+        if enabled && desired != baseline {
             ScrollInverter.invert(event)
         }
 
