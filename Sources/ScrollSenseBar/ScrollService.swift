@@ -1,0 +1,135 @@
+import AppKit
+import ApplicationServices
+import Combine
+import Foundation
+import ScrollSenseCore
+import ServiceManagement
+
+/// Bridges the menu-bar UI to `ScrollEngine`, `ConfigManager`, the Accessibility
+/// permission, and Login Items. All published state is main-actor owned so the
+/// SwiftUI views can bind to it directly.
+@MainActor
+final class ScrollService: ObservableObject {
+
+    /// The device behind the most recent scroll event (nil until the first scroll).
+    @Published private(set) var activeDevice: InputDevice?
+
+    /// Whether the engine is actively inverting events.
+    @Published private(set) var isRunning = false
+
+    /// Whether Accessibility permission has been granted.
+    @Published private(set) var hasAccessibility = false
+
+    /// Per-device preferences. Writing persists to disk and updates the engine live.
+    @Published var mouseNatural: Bool { didSet { persistAndApply() } }
+    @Published var trackpadNatural: Bool { didSet { persistAndApply() } }
+
+    /// Whether ScrollSense launches at login.
+    @Published var launchAtLogin: Bool { didSet { applyLaunchAtLogin() } }
+
+    private let engine = ScrollEngine()
+    private var permissionTimer: Timer?
+    private var isApplyingLoginItem = false
+
+    init() {
+        let config = ConfigManager.shared.load()
+        mouseNatural = config.mouseNatural
+        trackpadNatural = config.trackpadNatural
+        launchAtLogin = (SMAppService.mainApp.status == .enabled)
+
+        engine.onDeviceChange = { [weak self] device in
+            self?.activeDevice = device
+        }
+        engine.onStop = { [weak self] in
+            self?.isRunning = false
+        }
+
+        refreshPermission()
+        startEngineIfPossible()
+        startPermissionWatch()
+    }
+
+    /// The icon shown in the menu bar — reflects the active device, dimmed when
+    /// permission is missing.
+    var menuBarIcon: NSImage {
+        guard hasAccessibility else { return MenuBarIcon.image(for: .disabled) }
+        switch activeDevice {
+        case .mouse: return MenuBarIcon.image(for: .mouse)
+        case .trackpad: return MenuBarIcon.image(for: .trackpad)
+        case nil: return MenuBarIcon.image(for: .idle)
+        }
+    }
+
+    // MARK: - Permission
+
+    func requestAccessibility() {
+        let options =
+            [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
+        NSWorkspace.shared.open(
+            URL(
+                string:
+                    "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+            )!)
+    }
+
+    func refreshPermission() {
+        let granted = AXIsProcessTrusted()
+        if granted != hasAccessibility {
+            hasAccessibility = granted
+        }
+        // If permission appears while we're not yet running, start.
+        if granted && !isRunning {
+            startEngineIfPossible()
+        }
+    }
+
+    /// Poll for the grant so the UI flips to "running" once the user enables it,
+    /// without requiring an app restart.
+    private func startPermissionWatch() {
+        permissionTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) {
+            [weak self] _ in
+            Task { @MainActor in self?.refreshPermission() }
+        }
+    }
+
+    // MARK: - Engine
+
+    private func startEngineIfPossible() {
+        guard !isRunning else { return }
+        isRunning = engine.start()
+    }
+
+    private func persistAndApply() {
+        let config = ScrollPreferences(mouseNatural: mouseNatural, trackpadNatural: trackpadNatural)
+        ConfigManager.shared.save(config)
+        engine.update(config: config)
+    }
+
+    // MARK: - Login item
+
+    private func applyLaunchAtLogin() {
+        guard !isApplyingLoginItem else { return }
+        isApplyingLoginItem = true
+        defer { isApplyingLoginItem = false }
+        do {
+            if launchAtLogin {
+                if SMAppService.mainApp.status != .enabled {
+                    try SMAppService.mainApp.register()
+                }
+            } else {
+                if SMAppService.mainApp.status == .enabled {
+                    try SMAppService.mainApp.unregister()
+                }
+            }
+        } catch {
+            // Revert the toggle to reflect the real state on failure.
+            launchAtLogin = (SMAppService.mainApp.status == .enabled)
+        }
+    }
+
+    func quit() {
+        engine.stop()
+        NSApplication.shared.terminate(nil)
+    }
+}
