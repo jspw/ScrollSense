@@ -25,7 +25,35 @@ swift run scrollSense run --debug
 
 # Build, sign (with the stable cert if present, else ad-hoc), and install to /usr/local/bin
 ./install.sh
+
+# Build the menu-bar app into a signed build/ScrollSense.app bundle
+./build-app.sh
+
+# Generate the app icon (Resources/AppIcon.icns) from the brand mark
+./make-icon.sh
+
+# Package a distributable DMG (build/ScrollSense-<version>.dmg)
+./build-dmg.sh
+
+# Bump the in-source version (CLI version: in ScrollSense.swift) before releasing
+./bump-version.sh 1.1.0
+
+# Cut a GitHub release (builds DMG + publishes via gh): ./release.sh <version>
+./release.sh 1.1.0
 ```
+
+### Release flow / versioning
+Versions live in three places: the CLI `version:` in `ScrollSense.swift` (source),
+the menu-bar app `Info.plist` (stamped at build time from the script arg), and the
+Homebrew formula (`Formula/scrollsense.rb`). `release.sh` does **not** edit source.
+The intended flow:
+1. `./bump-version.sh <v>` — sets the CLI `version:` (the only manual source spot).
+2. `git commit -am "Release v<v>"`.
+3. `./release.sh <v>` — builds + publishes the app DMG GitHub release.
+4. `./scripts/release-homebrew.sh <v>` — tags, updates the formula (url + sha256 + assert).
+
+Either release script may run first; both reuse an existing `v<v>` tag (`release.sh`
+clobbers an existing release, `release-homebrew.sh` skips tag creation if present).
 
 > Note: in some environments SwiftPM dependency fetch fails with
 > `safe.bareRepository is 'explicit'`. Prefix builds with
@@ -48,6 +76,12 @@ Three-layer design:
 
 **1. CLI Layer** — [Sources/ScrollSense/ScrollSense.swift](Sources/ScrollSense/ScrollSense.swift)
 - Commands: `start`, `stop`, `run`, `set`, `status`, `install`, `uninstall`
+
+**1b. Menu-bar app** — [Sources/ScrollSenseBar/](Sources/ScrollSenseBar/)
+- SwiftUI `MenuBarExtra` (`.window` style) accessory app (no Dock icon).
+- `ScrollService` runs `ScrollEngine` (the non-blocking tap engine) and publishes the live device + running/permission state; `MenuPanelView` is the dropdown.
+- Bundled + signed via `build-app.sh`. **Do not run it alongside the CLI daemon** — two invertors cancel out.
+- Shared inversion logic lives in `ScrollInverter` (used by both `ScrollDaemon` and `ScrollEngine`).
 
 **2. Daemon Core** — [Sources/ScrollSense/ScrollDaemon.swift](Sources/ScrollSense/ScrollDaemon.swift)
 - Creates a `CGEventTap` to intercept scroll wheel events

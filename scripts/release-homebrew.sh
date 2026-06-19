@@ -193,21 +193,26 @@ if [[ -n "${TAP_DIR}" ]]; then
   fi
 fi
 
+TAG_EXISTS=0
 if git -C "${ROOT_DIR}" rev-parse -q --verify "refs/tags/${TAG_VERSION}" >/dev/null 2>&1; then
-  error_msg "Tag already exists locally: ${TAG_VERSION}"
-  exit 1
+  info "Tag already exists locally: ${TAG_VERSION} — reusing it (e.g. created by release.sh)."
+  TAG_EXISTS=1
 fi
 
-if git -C "${ROOT_DIR}" ls-remote --exit-code --tags "${REMOTE_NAME}" "refs/tags/${TAG_VERSION}" >/dev/null 2>&1; then
-  error_msg "Tag already exists on remote ${REMOTE_NAME}: ${TAG_VERSION}"
-  exit 1
+if [ "${TAG_EXISTS}" -eq 0 ] && git -C "${ROOT_DIR}" ls-remote --exit-code --tags "${REMOTE_NAME}" "refs/tags/${TAG_VERSION}" >/dev/null 2>&1; then
+  info "Tag already exists on remote ${REMOTE_NAME}: ${TAG_VERSION} — reusing it."
+  TAG_EXISTS=1
 fi
 
-info "Creating git tag ${TAG_VERSION}"
-git -C "${ROOT_DIR}" tag -a "${TAG_VERSION}" -m "Release ${TAG_VERSION}"
+if [ "${TAG_EXISTS}" -eq 0 ]; then
+  info "Creating git tag ${TAG_VERSION}"
+  git -C "${ROOT_DIR}" tag -a "${TAG_VERSION}" -m "Release ${TAG_VERSION}"
 
-info "Pushing git tag ${TAG_VERSION} to ${REMOTE_NAME}"
-git -C "${ROOT_DIR}" push "${REMOTE_NAME}" "${TAG_VERSION}"
+  info "Pushing git tag ${TAG_VERSION} to ${REMOTE_NAME}"
+  git -C "${ROOT_DIR}" push "${REMOTE_NAME}" "${TAG_VERSION}"
+else
+  info "Reusing existing tag ${TAG_VERSION} (skipping tag creation/push)."
+fi
 
 TARBALL_URL="https://github.com/${REPO_SLUG}/archive/refs/tags/${TAG_VERSION}.tar.gz"
 TMP_TARBALL="$(mktemp "/tmp/scrollsense-${PLAIN_VERSION}.XXXXXX.tar.gz")"

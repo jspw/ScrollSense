@@ -6,14 +6,22 @@
 
 ## Overview
 
-**ScrollSense** is a lightweight macOS daemon that automatically switches the system's Natural Scrolling behavior based on the active input device — mouse or trackpad.
+**ScrollSense** gives macOS per-device scroll direction: natural scrolling on the
+trackpad, traditional on the mouse — automatically, based on whichever device you're
+using right now.
 
-macOS uses a single global setting for natural scrolling. However, many users prefer:
+macOS only has a single global natural-scroll setting. Most people who use both a
+trackpad and a mouse want opposite behavior for each:
 
 * ✅ Natural scrolling **ON** for trackpad
 * ❌ Natural scrolling **OFF** for mouse
 
-ScrollSense intelligently detects which device is currently being used and dynamically updates the system preference — giving users the correct scrolling behavior automatically.
+ScrollSense detects the active device on every scroll event and **inverts the scroll
+direction in-flight** for the device that should behave opposite to your system
+setting. It does **not** flip the global macOS setting (that doesn't apply live on
+modern macOS) — it corrects the scroll itself, the same technique Scroll Reverser uses.
+
+Ships two ways: a **menu-bar app** (no Terminal needed) and a **CLI daemon**.
 
 No manual toggling. No friction. No System Settings visits.
 
@@ -40,19 +48,50 @@ There is no native per-device solution.
 
 ## The Solution
 
-ScrollSense runs as a background daemon that:
+ScrollSense runs an active `CGEventTap` that:
 
-1. Listens to low-level input events (scroll wheel) via `CGEventTap`
-2. Detects whether the event originated from an external mouse or trackpad
-3. Compares the detected device with user-defined preferences
-4. Updates macOS natural scrolling **only if needed**
-5. Avoids redundant system calls through internal state tracking
+1. Intercepts each scroll-wheel event
+2. Detects whether it came from a mouse or trackpad (`scrollWheelEventIsContinuous`)
+3. Compares the device's desired direction (your preference) against the current system baseline
+4. If they differ, **negates the event's scroll deltas in-place** so it scrolls the way you want
+5. Returns the (possibly modified) event before it reaches the app
 
-It simulates per-device scroll preferences — even though macOS does not support it natively.
+A discrete mouse only needs its line deltas flipped; a continuous trackpad also needs
+its point, fixed-point, and embedded IOHID scroll values flipped. This delivers true
+per-device behavior even though macOS has only one global setting.
+
+> While ScrollSense runs, the System Settings "Natural scrolling" checkbox is cosmetic
+> — leave it alone. Behavior is driven entirely by event inversion.
 
 ---
 
 ## Installation
+
+### Menu Bar App (.dmg) — recommended
+
+The easiest way to use ScrollSense: a menu-bar app with a dropdown for status and
+per-device toggles. No Terminal needed after install.
+
+1. Download the latest `ScrollSense-x.y.z.dmg` from [Releases](https://github.com/jspw/ScrollSense/releases) and open it.
+2. Drag **ScrollSense** into Applications.
+3. ScrollSense isn't notarized (no paid Apple Developer account), so macOS will say
+   it "can't verify the developer." Clear the quarantine flag:
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/ScrollSense.app
+   ```
+4. Launch it from Applications. A menu-bar icon appears — grant **Accessibility**
+   when prompted (the icon reflects your active device once running).
+
+> The menu-bar app and the CLI daemon both invert scroll events — run **one or the
+> other**, not both, or the two inversions cancel out.
+
+Build it yourself from source:
+
+```bash
+./setup-signing.sh   # one-time: stable cert so the Accessibility grant persists
+./make-icon.sh       # generate the app icon
+./build-dmg.sh       # produces build/ScrollSense-x.y.z.dmg
+```
 
 ### Homebrew (Published Tap)
 
@@ -102,13 +141,15 @@ install -m 755 .build/release/scrollSense /usr/local/bin/scrollSense
 
 ### Permissions Required
 
-ScrollSense requires **Accessibility** permission to monitor input events:
+ScrollSense requires **Accessibility** permission to intercept scroll events:
 
 1. Open **System Settings → Privacy & Security → Accessibility**
-2. Add your terminal app (e.g., Terminal, iTerm2) or the `scrollSense` binary
+2. Enable the relevant entry:
+   * **Menu-bar app:** `ScrollSense.app` (you'll be prompted on first launch)
+   * **CLI:** the `scrollSense` binary, or the terminal app you run it from
 3. Toggle the permission ON
 
-This is required only once during setup.
+This is required only once during setup. Signed builds keep the grant across updates.
 
 ---
 
@@ -143,12 +184,12 @@ Prints real-time debug output:
 
 ```
 [scrollSense] scrollSense daemon starting...
-[scrollSense DEBUG 2024-01-15T10:30:00Z] Initial system natural scroll: true
+[scrollSense DEBUG 2024-01-15T10:30:00Z] System natural scroll (baseline): true
 [scrollSense DEBUG 2024-01-15T10:30:00Z] Config: mouse=false, trackpad=true
 [scrollSense] scrollSense daemon running. Listening for scroll events...
 [scrollSense] Debug mode enabled. Press Ctrl+C to stop.
 [scrollSense DEBUG 2024-01-15T10:30:05Z] Device switch: none → mouse
-[scrollSense DEBUG 2024-01-15T10:30:05Z] Applying scroll change: natural=false (for Mouse)
+[scrollSense DEBUG 2024-01-15T10:30:05Z] Inverting scroll for Mouse (desired natural=false, system=true)
 ```
 
 ### Start Daemon (Background)
@@ -229,22 +270,30 @@ ScrollSense is built natively using Swift and macOS system frameworks.
 
 ```
 Sources/
-├── ScrollSense/              # Core library (ScrollSenseCore)
-│   ├── Models.swift          # InputDevice, ScrollPreferences, DaemonState
-│   ├── ConfigManager.swift   # Preferences storage (~/.scrollsense.json)
-│   ├── DeviceDetector.swift  # CGEvent-based device detection
-│   ├── ScrollController.swift # System scroll setting read/write
-│   ├── StateManager.swift    # Runtime state & optimization
-│   ├── ScrollDaemon.swift    # Main event loop & switching logic
-│   ├── PIDManager.swift      # PID file tracking for daemon state
+├── ScrollSense/                # Core library (ScrollSenseCore)
+│   ├── Models.swift            # InputDevice, ScrollPreferences, DaemonState
+│   ├── ConfigManager.swift     # Preferences storage (~/.scrollsense.json)
+│   ├── DeviceDetector.swift    # CGEvent-based device detection
+│   ├── ScrollInverter.swift    # Negates scroll deltas (mouse vs trackpad fields)
+│   ├── ScrollController.swift  # Reads the system natural-scroll baseline
+│   ├── StateManager.swift      # Runtime state & counters
+│   ├── ScrollDaemon.swift      # CLI daemon: blocking event-tap run loop
+│   ├── ScrollEngine.swift      # Non-blocking tap engine for the menu-bar app
+│   ├── PIDManager.swift        # PID file tracking for daemon state
 │   ├── LaunchAgentManager.swift # LaunchAgent install/uninstall
-│   ├── Logger.swift          # Logging utility
-│   └── ScrollSense.swift     # CLI command definitions
+│   ├── Logger.swift            # Logging utility
+│   └── ScrollSense.swift       # CLI command definitions
+├── CScrollHID/                 # C shim for private IOKit IOHID scroll symbols
 ├── ScrollSenseApp/
-│   └── main.swift            # Executable entry point
+│   └── main.swift              # CLI executable entry point
+└── ScrollSenseBar/             # Menu-bar app (SwiftUI MenuBarExtra)
+    ├── ScrollSenseBarApp.swift # @main app + accessory activation policy
+    ├── ScrollService.swift     # Engine + config + permission + login item
+    ├── MenuPanelView.swift     # Dropdown panel UI
+    └── MenuBarIcon.swift       # Device-aware template menu-bar icon
 Tests/
 └── ScrollSenseTests/
-    └── ScrollSenseTests.swift # Unit tests (Swift Testing)
+    └── ScrollSenseTests.swift  # Unit tests (Swift Testing)
 ```
 
 ### Module Responsibilities
@@ -254,41 +303,47 @@ Tests/
 | **Models** | Data types: `InputDevice`, `ScrollPreferences`, `DaemonState` |
 | **ConfigManager** | Load/save preferences from `~/.scrollsense.json` |
 | **DeviceDetector** | Detect mouse vs trackpad from `CGEvent` fields |
-| **ScrollController** | Read/write macOS `com.apple.swipescrolldirection` via CoreFoundation `CFPreferences` API |
-| **StateManager** | Track runtime state, optimize by avoiding redundant writes |
-| **ScrollDaemon** | Main event tap loop, orchestrates detection → comparison → update |
+| **ScrollInverter** | Negate an event's scroll deltas — line deltas for a mouse; point/fixed/IOHID too for a trackpad |
+| **ScrollController** | Read the system natural-scroll setting (`com.apple.swipescrolldirection`) as the inversion baseline |
+| **StateManager** | Track runtime state and counters for status reporting |
+| **ScrollDaemon** | CLI daemon: blocking `CGEventTap` run loop + PID/signals |
+| **ScrollEngine** | Non-blocking tap engine the menu-bar app runs on a background thread |
+| **CScrollHID** | C shim exposing private IOKit `IOHIDEvent` symbols to flip trackpad scroll |
 | **PIDManager** | PID file tracking (`/tmp/scrollsense.pid`) for daemon lifecycle |
 | **LaunchAgentManager** | Install/uninstall macOS LaunchAgent for auto-start |
 | **Logger** | Structured logging with debug/info/warning/error levels |
 
+The menu-bar app target (`ScrollSenseBar`) wraps `ScrollEngine` in a SwiftUI
+`MenuBarExtra`; `ScrollInverter` is shared by both the CLI daemon and the app.
+
 ---
 
-## Optimized Runtime Logic
+## Runtime Logic
 
 ```
-On daemon start:
-  → Load config
-  → Read current system scroll state
-  → Wait for first input event
+On start:
+  → Load config (~/.scrollsense.json)
+  → Read the system natural-scroll baseline
+  → Create an active CGEventTap (tail-append, session level)
 
-On scroll event:
-  If desired_setting == last_applied_setting
-    → Do nothing (skip)
+On scroll event (synchronously, in the tap callback):
+  → Detect device (continuous → trackpad, discrete → mouse)
+  → desired = config.naturalScroll(for: device)
+  If desired == baseline
+    → pass the event through unchanged
   Else
-    → Update macOS scroll direction
-    → Record new applied state
+    → negate the event's scroll deltas (device-specific fields)
+    → return the modified event
 
-On device switch:
-  → Log the switch (debug mode)
-  → Evaluate if scroll change is needed
+Every 2s: reload config + re-read the baseline (cheap, off the hot path)
 ```
 
 This ensures:
 
-* ✅ No repeated system writes
-* ✅ No unnecessary preference API calls
-* ✅ Setting changes dispatched asynchronously — zero scroll lag
-* ✅ No system-wide side effects (no process kills)
+* ✅ Correct direction per device, applied live — no logout required
+* ✅ No writes to system preferences, no `defaults`/process kills
+* ✅ Inversion happens in the callback before delivery — no scroll lag
+* ✅ Adapts to whatever your global natural-scroll setting is
 
 ---
 
@@ -314,12 +369,14 @@ Additional fields available for debug inspection:
 
 **User preference:** Mouse → Natural OFF, Trackpad → Natural ON
 
+Assume the system baseline is natural ON.
+
 | Step | Action | Result |
 |------|--------|--------|
-| 1 | User scrolling with trackpad | Natural ON (already set) |
-| 2 | User grabs mouse, scrolls | ScrollSense detects mouse → Natural OFF applied |
-| 3 | User continues using mouse | No checks performed (optimized) |
-| 4 | User touches trackpad | Device switch detected → Natural ON applied |
+| 1 | Scrolling with trackpad | Matches baseline → passed through → natural |
+| 2 | Grabs mouse, scrolls | Detected as mouse → deltas inverted → traditional |
+| 3 | Keeps using mouse | Every mouse event inverted, transparently |
+| 4 | Touches trackpad | Detected as trackpad → passed through → natural |
 
 Seamless. Invisible. Instant.
 
@@ -330,14 +387,15 @@ Seamless. Invisible. Instant.
 | Component | Technology |
 |-----------|-----------|
 | Language | Swift 5.9+ |
-| Event Monitoring | CoreGraphics (`CGEventTap`) |
-| System Preferences | CoreFoundation `CFPreferences` API (`com.apple.swipescrolldirection`) |
+| Event interception | CoreGraphics (`CGEventTap`, active/`.defaultTap`) |
+| Trackpad inversion | Private IOKit `IOHIDEvent` symbols via a small C shim |
+| Menu-bar app | SwiftUI `MenuBarExtra` (macOS 13+) |
 | CLI Framework | [Swift Argument Parser](https://github.com/apple/swift-argument-parser) |
 | Build System | Swift Package Manager |
-| Auto-Start | macOS LaunchAgent |
+| Auto-Start | macOS LaunchAgent (CLI) / `SMAppService` Login Item (app) |
 | Testing | Swift Testing framework |
 
-No Electron. No UI frameworks. Pure native macOS.
+No Electron. SwiftUI only for the menu bar. Pure native macOS.
 
 ---
 
@@ -455,22 +513,22 @@ The daemon reloads this file every 2 seconds, so changes made via `scrollSense s
 
 ## Limitations
 
-* macOS has only one global natural scroll setting
-* ScrollSense dynamically switches it — it cannot set per-device simultaneously
-* Requires Accessibility permission
-* Requires macOS 12.0 (Monterey) or later
+* Requires **Accessibility** permission (needed for the event tap)
+* The System Settings "Natural scrolling" checkbox is cosmetic while ScrollSense runs
+* Run **one** invertor at a time — the menu-bar app and the CLI daemon would cancel each other out
+* Device detection relies on `scrollWheelEventIsContinuous`; some smooth-scroll mouse drivers report as continuous and may be misdetected as a trackpad
+* Requires macOS **13.0 (Ventura)** or later (the menu-bar app uses `MenuBarExtra`)
 
 ---
 
 ## Future Enhancements
 
-* [ ] Menu bar app
-* [ ] Device-specific sensitivity profiles
-* [ ] GUI preference panel
+* [x] Menu bar app
+* [x] GUI preference panel (menu-bar dropdown)
 * [x] Homebrew distribution
-* [ ] Notarized binary
-* [ ] Strict mode (periodic system preference verification)
-* [ ] Per-device custom scroll speed
+* [ ] Notarized binary (requires a paid Apple Developer account)
+* [ ] Per-axis inversion (vertical only / horizontal only)
+* [ ] Device-specific sensitivity / scroll speed
 * [ ] Scroll usage statistics
 
 ---
@@ -495,9 +553,37 @@ It removes friction from daily workflow by intelligently adapting to the user's 
 
 ---
 
+## Contributing
+
+Contributions are welcome! To get started:
+
+```bash
+git clone https://github.com/jspw/ScrollSense.git
+cd ScrollSense
+
+swift build                       # build everything
+swift test                        # run the test suite
+swift run scrollSense run --debug # run the CLI daemon
+./build-app.sh                    # build the menu-bar app bundle
+```
+
+Guidelines:
+
+* Keep the shared inversion logic in `ScrollInverter` — both the CLI daemon and the
+  menu-bar app depend on it. The mouse-vs-trackpad field branch is load-bearing; see
+  the comments before changing it.
+* The Accessibility grant is keyed to code signature — see `setup-signing.sh` and
+  [CLAUDE.md](CLAUDE.md) for why a stable cert matters during development.
+* Open an issue to discuss larger changes before sending a PR.
+
+## Releasing
+
+Maintainers: see **[RELEASING.md](RELEASING.md)** for the full version-bump and
+release flow (menu-bar DMG + Homebrew CLI).
+
 ## License
 
-MIT
+[MIT](LICENSE)
 
 ---
 

@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "ScrollSense",
     platforms: [
-        .macOS(.v12)
+        .macOS(.v13)
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.0.0")
@@ -31,11 +31,17 @@ let package = Package(
             ],
             path: "Sources/ScrollSense"
         ),
-        // Executable target (thin wrapper)
+        // Executable target (thin CLI wrapper)
         .executableTarget(
             name: "scrollSense",
             dependencies: ["ScrollSenseCore"],
             path: "Sources/ScrollSenseApp"
+        ),
+        // Menu-bar app (SwiftUI MenuBarExtra)
+        .executableTarget(
+            name: "ScrollSenseBar",
+            dependencies: ["ScrollSenseCore"],
+            path: "Sources/ScrollSenseBar"
         ),
         // Test target
         .testTarget(
