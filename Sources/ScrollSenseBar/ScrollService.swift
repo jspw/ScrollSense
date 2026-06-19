@@ -20,6 +20,11 @@ final class ScrollService: ObservableObject {
     /// Whether Accessibility permission has been granted.
     @Published private(set) var hasAccessibility = false
 
+    /// Whether the CLI daemon is also running. When true, both invertors are
+    /// active and their inversions cancel out — we surface a warning so the user
+    /// can disable one.
+    @Published private(set) var cliDaemonRunning = false
+
     /// Master switch. When off, ScrollSense pauses — events pass through unchanged.
     @Published var isEnabled: Bool { didSet { persistAndApply() } }
 
@@ -49,6 +54,7 @@ final class ScrollService: ObservableObject {
         }
 
         refreshPermission()
+        refreshExternalDaemon()
         startEngineIfPossible()
         startPermissionWatch()
     }
@@ -89,11 +95,26 @@ final class ScrollService: ObservableObject {
     }
 
     /// Poll for the grant so the UI flips to "running" once the user enables it,
-    /// without requiring an app restart.
+    /// without requiring an app restart. The same tick re-checks for a competing
+    /// CLI daemon so the double-inversion warning appears/clears on its own.
     private func startPermissionWatch() {
         permissionTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) {
             [weak self] _ in
-            Task { @MainActor in self?.refreshPermission() }
+            Task { @MainActor in
+                self?.refreshPermission()
+                self?.refreshExternalDaemon()
+            }
+        }
+    }
+
+    // MARK: - External daemon
+
+    /// Detect a running CLI daemon via its PID file. If one is up alongside the
+    /// app, both invert every scroll event and the two inversions cancel.
+    func refreshExternalDaemon() {
+        let running = PIDManager.runningPID != nil
+        if running != cliDaemonRunning {
+            cliDaemonRunning = running
         }
     }
 

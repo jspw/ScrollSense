@@ -10,6 +10,9 @@ struct MenuPanelView: View {
             header
 
             if service.hasAccessibility {
+                if service.cliDaemonRunning {
+                    conflictBanner
+                }
                 Divider().padding(.horizontal, 14)
                 Group {
                     currentDevice
@@ -17,6 +20,7 @@ struct MenuPanelView: View {
                     deviceControls
                 }
                 .opacity(service.isEnabled ? 1 : 0.4)
+                .disabled(!service.isEnabled)
                 .animation(.easeOut(duration: 0.18), value: service.isEnabled)
                 Divider().padding(.horizontal, 14)
                 footer
@@ -127,9 +131,11 @@ struct MenuPanelView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
                     .font(.system(size: 13, weight: .medium))
-                Text("Natural scrolling")
+                Text(isOn.wrappedValue ? "Scrolls naturally" : "Scrolls reversed")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
+                    .contentTransition(.opacity)
+                    .animation(.easeOut(duration: 0.18), value: isOn.wrappedValue)
             }
 
             Spacer()
@@ -137,7 +143,7 @@ struct MenuPanelView: View {
             Toggle("", isOn: isOn)
                 .labelsHidden()
                 .toggleStyle(.switch)
-                .controlSize(.mini)
+                .controlSize(.small)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 7)
@@ -154,18 +160,38 @@ struct MenuPanelView: View {
     private var footer: some View {
         VStack(spacing: 0) {
             Toggle(isOn: $service.launchAtLogin) {
-                Text("Launch at login").font(.system(size: 12))
+                Text("Launch at login")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
             }
             .toggleStyle(.switch)
-            .controlSize(.small)
+            .controlSize(.mini)
             .padding(.horizontal, 14)
-            .padding(.vertical, 8)
+            .padding(.vertical, 5)
 
             MenuButton(title: "Quit ScrollSense", shortcut: "⌘Q") { service.quit() }
                 .keyboardShortcut("q")
         }
-        .padding(.bottom, 6)
-        .padding(.top, 2)
+        .padding(.bottom, 5)
+        .padding(.top, 1)
+    }
+
+    // MARK: - Conflict banner
+
+    /// Shown when the CLI daemon is also running: both invert every event and the
+    /// two inversions cancel, so scrolling looks broken until one is stopped.
+    private var conflictBanner: some View {
+        HStack(alignment: .top, spacing: 7) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(.orange)
+            Text("The scrollSense CLI daemon is also running. Stop it with `scrollSense stop`, or scrolling may misbehave.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
     }
 
     // MARK: - Permission prompt
@@ -210,16 +236,18 @@ private struct MenuButton: View {
     var body: some View {
         Button(action: action) {
             HStack {
-                Text(title).font(.system(size: 12))
+                Text(title)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
                 Spacer()
                 if let shortcut {
                     Text(shortcut)
                         .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.tertiary)
                 }
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 6)
+            .padding(.vertical, 5)
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
             .background(
