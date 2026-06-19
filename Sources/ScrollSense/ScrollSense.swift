@@ -4,22 +4,66 @@ import Foundation
 
 // MARK: - Permission Helper
 
-/// Ensures Accessibility permission is granted, prompting + waiting if needed.
-/// Call this before starting the daemon, whether in foreground or background mode.
+/// The on-disk path of the currently running scrollSense binary.
+/// This is the exact entry that must be enabled in the Accessibility list.
+private func currentBinaryPath() -> String {
+    // Bundle.main.executablePath returns the real on-disk path of the running
+    // binary regardless of how it was invoked. argv[0] is unreliable: when the
+    // shell finds the command via PATH it may pass a bare "scrollSense", which
+    // would resolve against the current directory instead of the real location.
+    if let path = Bundle.main.executablePath {
+        return URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+    }
+    let raw = CommandLine.arguments.first ?? "scrollSense"
+    return URL(fileURLWithPath: raw).resolvingSymlinksInPath().path
+}
+
+/// Ensures Accessibility permission is granted before the daemon starts.
+///
+/// macOS applies an Accessibility grant only to a *freshly launched* process —
+/// enabling the switch while this process is already running does not reliably
+/// update its trust status. The previous implementation polled
+/// `AXIsProcessTrusted()` in an unbounded loop, which is why the console could
+/// sit on "Waiting for permission..." forever even after you'd enabled it.
+///
+/// Instead we prompt, poll briefly (in case macOS does update us live), and then
+/// exit with actionable guidance so the next launch picks up the grant.
 func ensureAccessibilityPermission() {
+    if AXIsProcessTrusted() { return }
+
+    // Trigger the system prompt and open the Accessibility pane.
     let promptOptions = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: true]
         as CFDictionary
-    guard !AXIsProcessTrustedWithOptions(promptOptions) else { return }
+    _ = AXIsProcessTrustedWithOptions(promptOptions)
 
-    Logger.info("Accessibility permission required — System Settings has opened.")
-    Logger.info("Enable scrollSense in Privacy & Security → Accessibility, then return here.")
-    Logger.info("Waiting for permission...")
-    while !AXIsProcessTrusted() {
-        usleep(500_000)  // poll every 0.5 s
+    let path = currentBinaryPath()
+    Logger.info("Accessibility permission is required to read scroll events.")
+    Logger.info("Enable this exact binary in System Settings → Privacy & Security → Accessibility:")
+    Logger.info("    \(path)")
+    Logger.info("Waiting up to 30s for the grant to take effect...")
+
+    // Poll briefly: on some macOS versions the running process does see the
+    // grant live; if so, proceed without forcing a restart.
+    let deadline = Date().addingTimeInterval(30)
+    while Date() < deadline {
+        if AXIsProcessTrusted() {
+            usleep(500_000)  // let TCC persist the grant
+            Logger.info("Permission granted.")
+            return
+        }
+        usleep(500_000)
     }
-    // Give TCC a moment to persist the grant before the daemon uses it.
-    usleep(1_000_000)  // 1 s
-    Logger.info("Permission granted.")
+
+    // Still not trusted — almost always because macOS only applies the grant to
+    // a newly launched process, or because a stale entry points at an old build.
+    Logger.error("Still not authorized after 30s.")
+    Logger.info("If you already enabled scrollSense:")
+    Logger.info("  • Remove any existing 'scrollSense' entry from the Accessibility list")
+    Logger.info("    (a stale entry shows as enabled but points at a previous build),")
+    Logger.info("  • re-add the path above with the + button,")
+    Logger.info("  • then run scrollSense again.")
+    Logger.info("macOS applies Accessibility grants only to a freshly launched process.")
+    exit(1)
 }
 
 // MARK: - CLI Commands

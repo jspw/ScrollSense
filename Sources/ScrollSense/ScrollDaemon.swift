@@ -1,59 +1,77 @@
 import ApplicationServices
+import CScrollHID
 import CoreGraphics
 import Foundation
 
 // MARK: - Scroll Daemon
 
-/// The main daemon that listens for scroll events and switches
-/// the macOS natural scroll setting based on the active input device.
+/// The main daemon that listens for scroll events and corrects the scroll
+/// direction per input device by inverting scroll deltas in-flight.
+///
+/// macOS has a single global "natural scrolling" toggle, but users often want
+/// opposite behavior for mouse vs. trackpad. Rather than flipping the global
+/// setting (which macOS does not reliably apply to live input), we intercept
+/// each scroll event and negate its deltas when the active device's desired
+/// direction differs from the current system setting.
 public final class ScrollDaemon {
 
     private let stateManager = StateManager()
     private var config: ScrollPreferences
-    private var lastConfigCheck = Date()
+
+    /// The system's current global natural-scroll setting, used as the baseline
+    /// against which per-device inversion is decided. Refreshed periodically.
+    private var systemNaturalScroll: Bool
+    private var lastRefresh = Date()
     private var eventTap: CFMachPort?
 
-    /// Serial queue for applying system setting changes off the event callback thread.
-    private let applyQueue = DispatchQueue(label: "com.scrollsense.apply")
-
-    /// How often to reload config from disk (seconds).
-    private let configReloadInterval: TimeInterval = 2.0
+    /// How often to reload config + system baseline from disk (seconds).
+    private let refreshInterval: TimeInterval = 2.0
 
     public init() {
         self.config = ConfigManager.shared.load()
+        self.systemNaturalScroll = ScrollController.getCurrentNaturalScroll()
     }
 
     /// Start the daemon and begin listening for scroll events.
     /// - Parameter debug: If `true`, enables verbose debug logging.
     public func start(debug: Bool = false) {
         Logger.debugEnabled = debug
-        Logger.info("scrollSense daemon starting..." )
+        Logger.info("scrollSense daemon starting...")
 
         // Write PID file for tracking
         PIDManager.writePID()
 
         // Initialize state with current system setting
         stateManager.initializeWithSystemState()
-        Logger.debug(
-            "Initial system natural scroll: \(stateManager.state.lastAppliedScrollValue ?? false)")
+        Logger.debug("System natural scroll (baseline): \(systemNaturalScroll)")
         Logger.debug("Config: mouse=\(config.mouseNatural), trackpad=\(config.trackpadNatural)")
         Logger.debug("Config path: \(ConfigManager.shared.configPath)")
 
-        // Create event tap for scroll wheel events
+        // Create event tap for scroll wheel events. We need a *default* (active)
+        // tap, not listen-only, so we can modify and re-emit events.
         let mask = CGEventMask(1 << CGEventType.scrollWheel.rawValue)
 
         eventTap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .listenOnly,
+            place: .tailAppendEventTap,
+            options: .defaultTap,
             eventsOfInterest: mask,
-            callback: { _, _, event, refcon in
+            callback: { _, type, event, refcon in
                 guard let refcon = refcon else {
                     return Unmanaged.passUnretained(event)
                 }
                 let daemon = Unmanaged<ScrollDaemon>
                     .fromOpaque(refcon)
                     .takeUnretainedValue()
+
+                // The system disables a tap if the callback is too slow or on
+                // certain input events. Re-enable it so we keep receiving events.
+                if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+                    if let tap = daemon.eventTap {
+                        CGEvent.tapEnable(tap: tap, enable: true)
+                    }
+                    return Unmanaged.passUnretained(event)
+                }
 
                 daemon.handleEvent(event)
                 return Unmanaged.passUnretained(event)
@@ -110,10 +128,11 @@ public final class ScrollDaemon {
         )
     }
 
-    /// Handle a single scroll event.
+    /// Handle a single scroll event, inverting its direction if the active
+    /// device's desired direction differs from the system baseline.
     private func handleEvent(_ event: CGEvent) {
-        // Periodically reload config to pick up changes from `set` command
-        reloadConfigIfNeeded()
+        // Periodically reload config + system baseline to pick up changes.
+        refreshIfNeeded()
 
         // Detect device
         let device = DeviceDetector.detectDevice(from: event)
@@ -129,24 +148,55 @@ public final class ScrollDaemon {
             Logger.debug("Event details: \(DeviceDetector.debugDescription(for: event))")
         }
 
-        // Check if we need to apply a change — dispatch off the event callback thread
-        // so the handler returns immediately and never stalls scroll event processing.
-        if let desiredValue = stateManager.shouldApplyChange(for: device, config: config) {
-            // Optimistically record the value now (on the main thread) to prevent
-            // duplicate dispatches for events that arrive before the write completes.
-            stateManager.recordAppliedValue(desiredValue)
-            let displayName = device.displayName
-            applyQueue.async {
-                Logger.debug("Applying scroll change: natural=\(desiredValue) (for \(displayName))")
-                ScrollController.setNaturalScroll(desiredValue)
+        // The active device should scroll in `desired` direction. An untouched
+        // event already scrolls in the system baseline direction, so we only
+        // need to invert when the two differ.
+        let desired = config.naturalScroll(for: device)
+        if desired != systemNaturalScroll {
+            invertScroll(event)
+            if device != previousDevice {
+                Logger.debug(
+                    "Inverting scroll for \(device.displayName) (desired natural=\(desired), system=\(systemNaturalScroll))"
+                )
             }
         }
     }
 
-    /// Reload configuration from disk if enough time has passed.
-    private func reloadConfigIfNeeded() {
+    /// Negate the scroll direction of an event. Discrete (mouse) and continuous
+    /// (trackpad) events store their delta differently, so each needs different
+    /// fields flipped — matching how Scroll Reverser does it. Over-negating a
+    /// mouse event (touching the point/fixed/IOHID fields) breaks it.
+    private func invertScroll(_ event: CGEvent) {
+        // Line deltas apply to both, and are the only thing a discrete mouse uses.
+        let line1 = event.getIntegerValueField(.scrollWheelEventDeltaAxis1)
+        let line2 = event.getIntegerValueField(.scrollWheelEventDeltaAxis2)
+        event.setIntegerValueField(.scrollWheelEventDeltaAxis1, value: -line1)
+        event.setIntegerValueField(.scrollWheelEventDeltaAxis2, value: -line2)
+
+        // Only continuous (trackpad) events carry precise data in the point,
+        // fixed-point, and embedded IOHID fields. Flip those for trackpads only.
+        let isContinuous = event.getIntegerValueField(.scrollWheelEventIsContinuous) != 0
+        guard isContinuous else { return }
+
+        let point1 = event.getIntegerValueField(.scrollWheelEventPointDeltaAxis1)
+        let point2 = event.getIntegerValueField(.scrollWheelEventPointDeltaAxis2)
+        event.setIntegerValueField(.scrollWheelEventPointDeltaAxis1, value: -point1)
+        event.setIntegerValueField(.scrollWheelEventPointDeltaAxis2, value: -point2)
+
+        let fixed1 = event.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1)
+        let fixed2 = event.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis2)
+        event.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1, value: -fixed1)
+        event.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis2, value: -fixed2)
+
+        // Apps read the trackpad scroll amount from the embedded IOHID event.
+        ss_invert_iohid_scroll(event)
+    }
+
+    /// Reload configuration and the system baseline from disk if enough time has passed.
+    private func refreshIfNeeded() {
         let now = Date()
-        guard now.timeIntervalSince(lastConfigCheck) >= configReloadInterval else { return }
+        guard now.timeIntervalSince(lastRefresh) >= refreshInterval else { return }
+        lastRefresh = now
 
         let newConfig = ConfigManager.shared.load()
         if newConfig != config {
@@ -155,6 +205,11 @@ public final class ScrollDaemon {
             )
             config = newConfig
         }
-        lastConfigCheck = now
+
+        let newSystem = ScrollController.getCurrentNaturalScroll()
+        if newSystem != systemNaturalScroll {
+            Logger.debug("System natural scroll baseline changed: \(newSystem)")
+            systemNaturalScroll = newSystem
+        }
     }
 }
